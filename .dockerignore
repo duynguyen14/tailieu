@@ -1,0 +1,11 @@
+.git
+.idea
+.venv
+__pycache__
+.pytest_cache
+tmp
+output
+models
+data
+CamScanner-260703105539000
+

@@ -1,0 +1,81 @@
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.api.annotation_routes import router as annotation_router
+from app.api.routes import router
+from app.core.config import Settings, get_settings
+from app.core.logging import configure_logging
+from app.core.runtime import resolve_runtime
+from app.db.database import Database
+from app.models.factory import build_model_bundle
+from app.services.annotation import AnnotationService
+from app.services.pdf_renderer import PdfRenderer
+from app.services.pipeline import DocumentPipeline
+from app.services.storage import AnnotationStorage
+
+
+def create_app(settings: Settings | None = None) -> FastAPI:
+    settings = settings or get_settings()
+    configure_logging(settings.log_level)
+    runtime = resolve_runtime(settings)
+    models = build_model_bundle(settings)
+    renderer = PdfRenderer(
+        dpi=settings.pdf_dpi,
+        max_pages=settings.max_pages,
+        max_render_pixels=settings.max_render_pixels,
+    )
+    database = Database(settings)
+    if settings.auto_create_db:
+        database.create_tables()
+    annotation_storage = AnnotationStorage(settings.annotation_storage_path)
+    annotation_service = AnnotationService(
+        database=database,
+        storage=annotation_storage,
+        renderer=renderer,
+        max_file_size_bytes=settings.max_file_size_bytes,
+    )
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        try:
+            yield
+        finally:
+            database.close()
+
+    pipeline = DocumentPipeline(
+        settings=settings,
+        runtime=runtime,
+        models=models,
+        renderer=renderer,
+    )
+
+    app = FastAPI(
+        title=settings.app_name,
+        version="0.1.0",
+        description="Synchronous document annotation and extraction API.",
+        lifespan=lifespan,
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origin_list,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.state.settings = settings
+    app.state.runtime = runtime
+    app.state.models = models
+    app.state.pipeline = pipeline
+    app.state.database = database
+    app.state.annotation_storage = annotation_storage
+    app.state.annotation_service = annotation_service
+    app.include_router(router, prefix=settings.api_prefix)
+    app.include_router(annotation_router, prefix=settings.api_prefix)
+    return app
+
+
+app = create_app()

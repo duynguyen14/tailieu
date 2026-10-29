@@ -1,0 +1,28 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+tmp/
+output/
+models/
+
+# Local scanned documents and generated document images.
+/CamScanner-260703105539000/
+*.pdf
+*.PDF
+*.png
+*.PNG
+
+# Generated annotation data: copied PDFs, rendered PNG pages and import inbox.
+# Keep explicit rules even though the whole data directory is ignored below.
+/data/annotation_storage/
+/data/bulk_import_inbox/
+data/
+
