@@ -82,7 +82,10 @@ class Settings(BaseSettings):
     max_render_pixels: int = Field(default=25_000_000, ge=1_000_000)
     low_confidence_threshold: float = Field(default=0.80, ge=0.0, le=1.0)
 
-    mock_page_types: str = "DIPLOMATIC_NOTE,APPLICANT_TABLE,APPLICANT_LIST,OTHER"
+    mock_page_types: str = (
+        "DIPLOMATIC_NOTE,APPLICANT_TABLE,APPLICANT_LIST,VISA_APPLICATION_FORM,"
+        "TEMPORARY_RESIDENCE_EXTENSION_FORM,PASSPORT_FRONT,PASSPORT_BACK,VISA_STICKER,OTHER"
+    )
 
     @field_validator("api_prefix")
     @classmethod

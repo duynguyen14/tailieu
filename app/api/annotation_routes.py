@@ -29,23 +29,48 @@ router = APIRouter(prefix="/annotation", tags=["annotation"])
 LABELS = [
     LabelDefinition(
         code="DIPLOMATIC_NOTE",
-        display_name="Diplomatic note",
-        description="Diplomatic or consular note page that must be read.",
+        display_name="Công hàm",
+        description="Trang công hàm ngoại giao hoặc công hàm lãnh sự.",
     ),
     LabelDefinition(
         code="APPLICANT_TABLE",
-        display_name="Applicant table",
-        description="Applicant information arranged in rows and columns.",
+        display_name="Bảng người nộp",
+        description="Thông tin người nộp được trình bày theo hàng và cột.",
     ),
     LabelDefinition(
         code="APPLICANT_LIST",
-        display_name="Applicant list",
-        description="Applicant information arranged as a list rather than a table.",
+        display_name="Danh sách người nộp",
+        description="Thông tin người nộp được trình bày dạng danh sách.",
+    ),
+    LabelDefinition(
+        code="VISA_APPLICATION_FORM",
+        display_name="Tờ khai đề nghị cấp thị thực",
+        description="Visa application form hoặc tờ khai đề nghị cấp thị thực.",
+    ),
+    LabelDefinition(
+        code="TEMPORARY_RESIDENCE_EXTENSION_FORM",
+        display_name="Phiếu trình gia hạn tạm trú",
+        description="Phiếu trình, đơn hoặc biểu mẫu đề nghị gia hạn tạm trú.",
+    ),
+    LabelDefinition(
+        code="PASSPORT_FRONT",
+        display_name="Hộ chiếu mặt trước",
+        description="Trang hoặc mặt trước của hộ chiếu.",
+    ),
+    LabelDefinition(
+        code="PASSPORT_BACK",
+        display_name="Hộ chiếu mặt sau",
+        description="Trang hoặc mặt sau của hộ chiếu.",
+    ),
+    LabelDefinition(
+        code="VISA_STICKER",
+        display_name="Thị thực dán trên hộ chiếu",
+        description="Trang hộ chiếu có tem hoặc nhãn thị thực được dán.",
     ),
     LabelDefinition(
         code="OTHER",
-        display_name="Other",
-        description="Any page outside the three extraction targets.",
+        display_name="Tài liệu khác",
+        description="Trang không thuộc các nhóm tài liệu đã định nghĩa.",
     ),
 ]
 

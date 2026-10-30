@@ -220,7 +220,24 @@ def test_annotation_review_queue_returns_pending_pages_in_order() -> None:
         assert complete["stats"] == {"pending": 0, "reviewed": 2, "total": 2}
 
 
-def test_annotation_labels_are_exactly_the_four_review_classes() -> None:
+def test_annotation_review_accepts_an_expanded_label() -> None:
+    with _client() as client:
+        imported = client.post(
+            "/api/v1/annotation/documents",
+            files={"file": ("visa.pdf", _two_page_pdf(), "application/pdf")},
+        )
+        document_id = imported.json()["document"]["id"]
+
+        reviewed = client.put(
+            f"/api/v1/annotation/documents/{document_id}/pages/1/review",
+            json={"label": "VISA_STICKER", "reviewed_by": "tester"},
+        )
+
+    assert reviewed.status_code == 200
+    assert reviewed.json()["page"]["label"] == "VISA_STICKER"
+
+
+def test_annotation_labels_are_exactly_the_supported_review_classes() -> None:
     with _client() as client:
         response = client.get("/api/v1/annotation/labels")
 
@@ -229,5 +246,10 @@ def test_annotation_labels_are_exactly_the_four_review_classes() -> None:
         "DIPLOMATIC_NOTE",
         "APPLICANT_TABLE",
         "APPLICANT_LIST",
+        "VISA_APPLICATION_FORM",
+        "TEMPORARY_RESIDENCE_EXTENSION_FORM",
+        "PASSPORT_FRONT",
+        "PASSPORT_BACK",
+        "VISA_STICKER",
         "OTHER",
     ]

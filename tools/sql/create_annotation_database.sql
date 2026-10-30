@@ -77,7 +77,7 @@ BEGIN
         width               INT           NOT NULL,
         height              INT           NOT NULL,
 
-        -- Null until a reviewer assigns one of the four page classes.
+        -- Null until a reviewer assigns one of the supported page classes.
         label               NVARCHAR(64)  NULL,
         review_status       NVARCHAR(32)  NOT NULL
             CONSTRAINT DF_annotation_pages_review_status DEFAULT N'UNLABELED',
@@ -101,7 +101,9 @@ BEGIN
         CONSTRAINT CK_annotation_pages_dimensions CHECK (width > 0 AND height > 0),
         CONSTRAINT CK_annotation_pages_label CHECK
             (label IS NULL OR label IN
-                (N'DIPLOMATIC_NOTE', N'APPLICANT_TABLE', N'APPLICANT_LIST', N'OTHER')),
+                (N'DIPLOMATIC_NOTE', N'APPLICANT_TABLE', N'APPLICANT_LIST',
+                 N'VISA_APPLICATION_FORM', N'TEMPORARY_RESIDENCE_EXTENSION_FORM',
+                 N'PASSPORT_FRONT', N'PASSPORT_BACK', N'VISA_STICKER', N'OTHER')),
         CONSTRAINT CK_annotation_pages_review_status CHECK
             (review_status IN (N'UNLABELED', N'REVIEWED'))
     );
