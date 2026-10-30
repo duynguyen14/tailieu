@@ -2,7 +2,19 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from decimal import Decimal
+
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -55,6 +67,15 @@ class AnnotationPage(Base):
     width: Mapped[int] = mapped_column(Integer, nullable=False)
     height: Mapped[int] = mapped_column(Integer, nullable=False)
     label: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    model_predicted_label: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    model_prediction_confidence: Mapped[Decimal | None] = mapped_column(
+        Numeric(9, 6), nullable=True
+    )
+    model_prediction_topk_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_prediction_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    model_predicted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     review_status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="UNLABELED", index=True
     )
@@ -69,3 +90,132 @@ class AnnotationPage(Base):
     )
 
     document: Mapped[AnnotationDocument] = relationship(back_populates="pages")
+
+
+class TableAnnotation(Base):
+    __tablename__ = "table_annotations"
+    __table_args__ = (
+        CheckConstraint("source IN ('MODEL', 'HUMAN')", name="ck_table_annotation_source"),
+        CheckConstraint(
+            "status IN ('PENDING', 'PROCESSING', 'PREDICTED', 'REVIEWED', 'FAILED')",
+            name="ck_table_annotation_status",
+        ),
+        CheckConstraint(
+            "processing_time_ms IS NULL OR processing_time_ms >= 0",
+            name="ck_table_annotation_processing_time",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    page_id: Mapped[str] = mapped_column(
+        ForeignKey("annotation_pages.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    parent_annotation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("table_annotations.id"), nullable=True
+    )
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    model_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    model_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    processing_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    page: Mapped[AnnotationPage] = relationship()
+    regions: Mapped[list[TableRegion]] = relationship(
+        back_populates="annotation",
+        cascade="all, delete-orphan",
+        order_by="TableRegion.table_index",
+    )
+
+
+class TableRegion(Base):
+    __tablename__ = "table_regions"
+    __table_args__ = (
+        UniqueConstraint("annotation_id", "table_index", name="uq_table_region_index"),
+        CheckConstraint("table_index >= 0", name="ck_table_region_index"),
+        CheckConstraint(
+            "x1 >= 0 AND y1 >= 0 AND x2 > x1 AND y2 > y1",
+            name="ck_table_region_bbox",
+        ),
+        CheckConstraint(
+            "confidence IS NULL OR (confidence >= 0 AND confidence <= 1)",
+            name="ck_table_region_confidence",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    annotation_id: Mapped[str] = mapped_column(
+        ForeignKey("table_annotations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    table_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    x1: Mapped[int] = mapped_column(Integer, nullable=False)
+    y1: Mapped[int] = mapped_column(Integer, nullable=False)
+    x2: Mapped[int] = mapped_column(Integer, nullable=False)
+    y2: Mapped[int] = mapped_column(Integer, nullable=False)
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    annotation: Mapped[TableAnnotation] = relationship(back_populates="regions")
+    elements: Mapped[list[TableStructureElement]] = relationship(
+        back_populates="table_region",
+        cascade="all, delete-orphan",
+        order_by="TableStructureElement.element_type, "
+        "TableStructureElement.row_index, TableStructureElement.column_index",
+    )
+
+
+class TableStructureElement(Base):
+    __tablename__ = "table_structure_elements"
+    __table_args__ = (
+        CheckConstraint(
+            "element_type IN ('HEADER_ROW', 'DATA_ROW', 'COLUMN', 'CELL')",
+            name="ck_table_structure_element_type",
+        ),
+        CheckConstraint("row_span >= 1 AND column_span >= 1", name="ck_table_element_span"),
+        CheckConstraint(
+            "x1 >= 0 AND y1 >= 0 AND x2 > x1 AND y2 > y1",
+            name="ck_table_element_bbox",
+        ),
+        CheckConstraint(
+            "confidence IS NULL OR (confidence >= 0 AND confidence <= 1)",
+            name="ck_table_element_confidence",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    table_region_id: Mapped[str] = mapped_column(
+        ForeignKey("table_regions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    element_type: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    row_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    column_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    row_span: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    column_span: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    x1: Mapped[int] = mapped_column(Integer, nullable=False)
+    y1: Mapped[int] = mapped_column(Integer, nullable=False)
+    x2: Mapped[int] = mapped_column(Integer, nullable=False)
+    y2: Mapped[int] = mapped_column(Integer, nullable=False)
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    table_region: Mapped[TableRegion] = relationship(back_populates="elements")

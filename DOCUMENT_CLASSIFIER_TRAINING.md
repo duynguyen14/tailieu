@@ -83,3 +83,55 @@ models/page_classifier/
 
 Việc chia train/validation/test được thực hiện theo `document_id`; các trang của cùng
 một PDF luôn nằm trong cùng một split để tránh rò rỉ dữ liệu giữa train và test.
+
+## Chạy model trên các page chưa review
+
+Sau khi training hoàn tất, export checkpoint tốt nhất:
+
+```powershell
+python -m tools.export_classifier_onnx
+```
+
+Khởi tạo các cột prediction trong SQL Server (chạy nhiều lần an toàn):
+
+```powershell
+python -m tools.migrate_page_predictions
+```
+
+Cài ONNX Runtime CPU:
+
+```powershell
+python -m pip install -r requirements-inference.txt
+```
+
+Nếu dùng CUDA, cài `onnxruntime-gpu` thay cho `onnxruntime`; không cài đồng thời cả
+hai package trong cùng virtual environment.
+
+Chạy thử 100 page chưa review:
+
+```powershell
+python -m tools.predict_unreviewed_pages --limit 100 --device cpu
+```
+
+Sau khi kiểm tra frontend/API, chạy toàn bộ số page còn lại:
+
+```powershell
+python -m tools.predict_unreviewed_pages --device cpu
+```
+
+Tool chỉ chọn `annotation_pages.review_status = UNLABELED`. Nó cập nhật `label` để
+frontend chọn sẵn và lưu thêm nhãn/confidence/top-3/model version vào các cột
+`model_prediction_*`, nhưng không thay đổi `review_status`, `reviewed_by` hoặc
+`reviewed_at`.
+
+Page đã được dự đoán bởi cùng `PAGE_CLASSIFIER_MODEL_VERSION` sẽ được bỏ qua. Dùng
+`--force` nếu cần chạy lại model trên các page vẫn còn `UNLABELED`:
+
+```powershell
+python -m tools.predict_unreviewed_pages --device cpu --force
+```
+
+Khi reviewer bấm `Lưu & Next`, API hiện tại chuyển page sang `REVIEWED` và giữ lại
+`model_predicted_label`. Vì vậy có thể so sánh nhãn cuối cùng với prediction ban đầu
+để tính tỷ lệ model được xác nhận hoặc bị sửa. Dataset exporter vẫn chỉ lấy các page
+`REVIEWED`, nên prediction chưa được human xác nhận không đi vào dữ liệu train.

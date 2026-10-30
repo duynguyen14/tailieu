@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile, status
@@ -18,6 +19,8 @@ from app.schemas.annotation import (
     LabelDefinition,
     PageReviewRequest,
     PageReviewResponse,
+    PagePrediction,
+    PagePredictionItem,
     ReviewStatus,
 )
 from app.services.annotation import AnnotationNotFoundError, AnnotationService
@@ -119,7 +122,37 @@ def _page_image_response(
         document_page_count=document.page_count,
         page=_page_summary(page),
         image_base64=image_base64,
+        prediction=_page_prediction(page),
     )
+
+
+def _page_prediction(page: AnnotationPage) -> PagePrediction | None:
+    if not (
+        page.model_predicted_label
+        and page.model_prediction_confidence is not None
+        and page.model_prediction_version
+        and page.model_predicted_at
+    ):
+        return None
+    try:
+        raw_top_predictions = json.loads(page.model_prediction_topk_json or "[]")
+        top_predictions = [
+            PagePredictionItem(
+                label=item["label"],
+                confidence=float(item["confidence"]),
+            )
+            for item in raw_top_predictions
+            if isinstance(item, dict) and "label" in item and "confidence" in item
+        ]
+        return PagePrediction(
+            label=page.model_predicted_label,
+            confidence=float(page.model_prediction_confidence),
+            model_version=page.model_prediction_version,
+            predicted_at=page.model_predicted_at,
+            top_predictions=top_predictions,
+        )
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
 
 
 @router.get("/labels", response_model=list[LabelDefinition])

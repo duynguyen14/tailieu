@@ -1,0 +1,7 @@
+-r requirements.txt
+
+# Install the matching PaddlePaddle CPU or GPU wheel first from the official
+# PaddlePaddle package index, then install this file.
+Pillow>=11.0,<13.0
+numpy>=1.26,<3.0
+paddleocr>=3.3,<4.0

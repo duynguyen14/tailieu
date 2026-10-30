@@ -79,6 +79,11 @@ BEGIN
 
         -- Null until a reviewer assigns one of the supported page classes.
         label               NVARCHAR(64)  NULL,
+        model_predicted_label       NVARCHAR(64)  NULL,
+        model_prediction_confidence DECIMAL(9,6) NULL,
+        model_prediction_topk_json  NVARCHAR(MAX) NULL,
+        model_prediction_version    NVARCHAR(100) NULL,
+        model_predicted_at          DATETIMEOFFSET(7) NULL,
         review_status       NVARCHAR(32)  NOT NULL
             CONSTRAINT DF_annotation_pages_review_status DEFAULT N'UNLABELED',
         reviewed_by         NVARCHAR(100) NULL,
@@ -106,7 +111,18 @@ BEGIN
                  N'PASSPORT_FRONT', N'VISA_STICKER',
                  N'VISA_REQUEST_OFFICIAL_LETTER', N'OTHER')),
         CONSTRAINT CK_annotation_pages_review_status CHECK
-            (review_status IN (N'UNLABELED', N'REVIEWED'))
+            (review_status IN (N'UNLABELED', N'REVIEWED')),
+        CONSTRAINT CK_annotation_pages_prediction_label CHECK
+            (model_predicted_label IS NULL OR model_predicted_label IN
+                (N'DIPLOMATIC_NOTE', N'APPLICANT_TABLE', N'APPLICANT_LIST',
+                 N'VISA_APPLICATION_FORM', N'TEMPORARY_RESIDENCE_EXTENSION_FORM',
+                 N'PASSPORT_FRONT', N'VISA_STICKER',
+                 N'VISA_REQUEST_OFFICIAL_LETTER', N'OTHER')),
+        CONSTRAINT CK_annotation_pages_prediction_confidence CHECK
+            (model_prediction_confidence IS NULL OR
+                (model_prediction_confidence >= 0 AND model_prediction_confidence <= 1)),
+        CONSTRAINT CK_annotation_pages_prediction_topk_json CHECK
+            (model_prediction_topk_json IS NULL OR ISJSON(model_prediction_topk_json) = 1)
     );
 
     PRINT N'Created table dbo.annotation_pages.';
@@ -160,6 +176,18 @@ IF NOT EXISTS
 )
     CREATE INDEX IX_annotation_pages_review_status
         ON dbo.annotation_pages (review_status);
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = N'IX_annotation_pages_prediction_queue'
+      AND object_id = OBJECT_ID(N'dbo.annotation_pages')
+)
+    CREATE INDEX IX_annotation_pages_prediction_queue
+        ON dbo.annotation_pages (review_status, model_prediction_version, model_predicted_at)
+        INCLUDE (label, model_predicted_label, model_prediction_confidence);
 GO
 
 PRINT N'Database and annotation tables are ready.';

@@ -73,12 +73,26 @@ class AnnotationImportResponse(BaseModel):
     document: AnnotationDocumentDetail
 
 
+class PagePredictionItem(BaseModel):
+    label: AnnotationLabel
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class PagePrediction(BaseModel):
+    label: AnnotationLabel
+    confidence: float = Field(ge=0.0, le=1.0)
+    model_version: str
+    predicted_at: datetime
+    top_predictions: list[PagePredictionItem] = Field(default_factory=list)
+
+
 class AnnotationPageImageResponse(BaseModel):
     document_id: str
     original_filename: str
     document_page_count: int = Field(gt=0)
     page: AnnotationPageSummary
     image_base64: str
+    prediction: PagePrediction | None = None
 
 
 class AnnotationReviewStats(BaseModel):

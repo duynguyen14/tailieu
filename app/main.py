@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.annotation_routes import router as annotation_router
 from app.api.routes import router
+from app.api.table_annotation_routes import router as table_annotation_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.core.runtime import resolve_runtime
@@ -16,6 +17,7 @@ from app.services.annotation import AnnotationService
 from app.services.pdf_renderer import PdfRenderer
 from app.services.pipeline import DocumentPipeline
 from app.services.storage import AnnotationStorage
+from app.services.table_annotation import TableAnnotationService
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -37,6 +39,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         storage=annotation_storage,
         renderer=renderer,
         max_file_size_bytes=settings.max_file_size_bytes,
+    )
+    table_annotation_service = TableAnnotationService(
+        database=database,
+        storage=annotation_storage,
     )
 
     @asynccontextmanager
@@ -75,8 +81,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.database = database
     app.state.annotation_storage = annotation_storage
     app.state.annotation_service = annotation_service
+    app.state.table_annotation_service = table_annotation_service
     app.include_router(router, prefix=settings.api_prefix)
     app.include_router(annotation_router, prefix=settings.api_prefix)
+    app.include_router(table_annotation_router, prefix=settings.api_prefix)
     return app
 
 

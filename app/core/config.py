@@ -69,12 +69,29 @@ class Settings(BaseSettings):
 
     page_classifier_model_path: Path | None = None
     page_classifier_labels_path: Path | None = None
+    page_classifier_model_version: str = "mobilenet-v3-phase1"
+    page_classifier_batch_size: int = Field(default=64, ge=1, le=1024)
     ocr_det_model_path: Path | None = None
     ocr_rec_model_path: Path | None = None
     ocr_char_dict_path: Path | None = None
     note_extractor_model_path: Path | None = None
     note_extractor_labels_path: Path | None = None
     table_structure_model_path: Path | None = None
+
+    # Offline table annotation baseline. These models are loaded only by the
+    # tools.infer_table_structure command, never during API startup.
+    table_device: DevicePreference = DevicePreference.CPU
+    table_gpu_device_id: int = Field(default=0, ge=0)
+    table_allow_cpu_fallback: bool = True
+    table_layout_model_name: str = "PP-DocLayout-L"
+    table_layout_model_dir: Path | None = None
+    table_structure_model_name: str = "SLANet_plus"
+    table_structure_model_dir: Path | None = None
+    table_model_version: str = "paddle-table-baseline-v1"
+    table_layout_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    table_cpu_threads: int = Field(default=8, ge=1, le=128)
+    table_enable_hpi: bool = False
+    table_assume_first_row_header: bool = True
 
     pdf_dpi: int = Field(default=200, ge=72, le=400)
     max_file_size_mb: int = Field(default=30, ge=1, le=500)
@@ -153,6 +170,22 @@ class Settings(BaseSettings):
                 self.table_structure_model_path,
             ),
         }
+
+    @property
+    def page_classifier_model_resolved_path(self) -> Path | None:
+        return self.resolve_optional_project_path(self.page_classifier_model_path)
+
+    @property
+    def page_classifier_labels_resolved_path(self) -> Path | None:
+        return self.resolve_optional_project_path(self.page_classifier_labels_path)
+
+    @staticmethod
+    def resolve_optional_project_path(path: Path | None) -> Path | None:
+        if path is None:
+            return None
+        if path.is_absolute():
+            return path.resolve()
+        return (PROJECT_ROOT / path).resolve()
 
 
 @lru_cache

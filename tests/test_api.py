@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -10,8 +11,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.core.config import PROJECT_ROOT, Settings
-from app.db.models import AnnotationDocument, AnnotationPage
+from app.db.models import AnnotationDocument, AnnotationPage, TableAnnotation, utc_now
 from app.main import create_app
+from app.schemas.table_annotation import (
+    TableElementPayload,
+    TableElementType,
+    TableRegionPayload,
+)
 
 
 def _two_page_pdf() -> bytes:
@@ -252,6 +258,55 @@ def test_annotation_review_accepts_visa_request_official_letter_label() -> None:
     assert reviewed.json()["page"]["label"] == "VISA_REQUEST_OFFICIAL_LETTER"
 
 
+def test_model_prediction_is_suggested_but_remains_unreviewed_until_human_save() -> None:
+    with _client() as client:
+        imported = client.post(
+            "/api/v1/annotation/documents",
+            files={"file": ("predicted.pdf", _two_page_pdf(), "application/pdf")},
+        ).json()
+        document_id = imported["document"]["id"]
+        page_id = imported["document"]["pages"][0]["id"]
+        with client.app.state.database.session() as session:
+            page = session.get(AnnotationPage, page_id)
+            assert page is not None
+            page.label = "APPLICANT_TABLE"
+            page.model_predicted_label = "APPLICANT_TABLE"
+            page.model_prediction_confidence = 0.91
+            page.model_prediction_topk_json = json.dumps(
+                [
+                    {"label": "APPLICANT_TABLE", "confidence": 0.91},
+                    {"label": "APPLICANT_LIST", "confidence": 0.06},
+                    {"label": "OTHER", "confidence": 0.03},
+                ]
+            )
+            page.model_prediction_version = "test-phase1"
+            page.model_predicted_at = utc_now()
+
+        queued = client.get("/api/v1/annotation/review/next")
+        assert queued.status_code == 200
+        current = queued.json()["current"]
+        assert current["page"]["review_status"] == "UNLABELED"
+        assert current["page"]["label"] == "APPLICANT_TABLE"
+        assert current["prediction"]["label"] == "APPLICANT_TABLE"
+        assert current["prediction"]["confidence"] == 0.91
+        assert len(current["prediction"]["top_predictions"]) == 3
+
+        reviewed = client.put(
+            f"/api/v1/annotation/documents/{document_id}/pages/1/review",
+            json={"label": "DIPLOMATIC_NOTE", "reviewed_by": "thai"},
+        )
+        assert reviewed.status_code == 200
+        assert reviewed.json()["page"]["review_status"] == "REVIEWED"
+        assert reviewed.json()["page"]["label"] == "DIPLOMATIC_NOTE"
+
+        with client.app.state.database.session() as session:
+            stored = session.get(AnnotationPage, page_id)
+            assert stored is not None
+            assert stored.label == "DIPLOMATIC_NOTE"
+            assert stored.model_predicted_label == "APPLICANT_TABLE"
+            assert stored.model_prediction_version == "test-phase1"
+
+
 def test_annotation_labels_are_exactly_the_supported_review_classes() -> None:
     with _client() as client:
         response = client.get("/api/v1/annotation/labels")
@@ -268,3 +323,133 @@ def test_annotation_labels_are_exactly_the_supported_review_classes() -> None:
         "VISA_REQUEST_OFFICIAL_LETTER",
         "OTHER",
     ]
+
+
+def test_table_annotation_prediction_and_human_review_flow() -> None:
+    with _client() as client:
+        imported = client.post(
+            "/api/v1/annotation/documents",
+            files={"file": ("table-review.pdf", _two_page_pdf(), "application/pdf")},
+        )
+        document_id = imported.json()["document"]["id"]
+        client.put(
+            f"/api/v1/annotation/documents/{document_id}/pages/2/review",
+            json={"label": "APPLICANT_TABLE", "reviewed_by": "classifier-reviewer"},
+        )
+        page_id = imported.json()["document"]["pages"][1]["id"]
+        table_service = client.app.state.table_annotation_service
+        prediction_id = table_service.start_model_annotation(
+            page_id=page_id,
+            model_name="test-layout+test-structure",
+            model_version="test-v1",
+            force=False,
+        )
+        table_service.complete_model_annotation(
+            annotation_id=prediction_id,
+            processing_time_ms=123,
+            tables=[
+                TableRegionPayload(
+                    table_index=0,
+                    bbox=(20, 100, 280, 350),
+                    confidence=0.9,
+                    elements=[
+                        TableElementPayload(
+                            element_type=TableElementType.HEADER_ROW,
+                            row_index=0,
+                            bbox=(20, 100, 280, 150),
+                            confidence=0.8,
+                        ),
+                        TableElementPayload(
+                            element_type=TableElementType.DATA_ROW,
+                            row_index=1,
+                            bbox=(20, 150, 280, 220),
+                            confidence=0.8,
+                        ),
+                        TableElementPayload(
+                            element_type=TableElementType.COLUMN,
+                            column_index=0,
+                            bbox=(20, 100, 150, 350),
+                            confidence=0.8,
+                        ),
+                        TableElementPayload(
+                            element_type=TableElementType.CELL,
+                            row_index=1,
+                            column_index=0,
+                            bbox=(20, 150, 150, 220),
+                            confidence=0.8,
+                        ),
+                    ],
+                )
+            ],
+        )
+
+        queued = client.get("/api/v1/table-annotation/review/next")
+        assert queued.status_code == 200
+        queue_payload = queued.json()
+        assert queue_payload["current"]["annotation"]["id"] == prediction_id
+        assert queue_payload["current"]["page"]["page_number"] == 2
+        assert queue_payload["current"]["tables"][0]["bbox"] == [20, 100, 280, 350]
+        assert queue_payload["stats"] == {
+            "pending": 1,
+            "reviewed": 0,
+            "failed": 0,
+            "total": 1,
+        }
+        assert base64.b64decode(queue_payload["current"]["image_base64"]).startswith(
+            b"\x89PNG\r\n\x1a\n"
+        )
+
+        reviewed = client.put(
+            f"/api/v1/table-annotation/{prediction_id}/review",
+            json={
+                "reviewed_by": "thai",
+                "review_note": "adjusted table edge",
+                "tables": [
+                    {
+                        "table_index": 0,
+                        "bbox": [15, 95, 285, 355],
+                        "elements": [
+                            {
+                                "element_type": "HEADER_ROW",
+                                "row_index": 0,
+                                "bbox": [15, 95, 285, 150],
+                            },
+                            {
+                                "element_type": "DATA_ROW",
+                                "row_index": 1,
+                                "bbox": [15, 150, 285, 225],
+                            },
+                        ],
+                    }
+                ],
+            },
+        )
+        assert reviewed.status_code == 200
+        reviewed_payload = reviewed.json()
+        assert reviewed_payload["annotation"]["source"] == "HUMAN"
+        assert reviewed_payload["annotation"]["status"] == "REVIEWED"
+        assert reviewed_payload["annotation"]["parent_annotation_id"] == prediction_id
+        assert reviewed_payload["tables"][0]["bbox"] == [15, 95, 285, 355]
+
+        complete = client.get("/api/v1/table-annotation/review/next").json()
+        assert complete["current"] is None
+        assert complete["stats"] == {
+            "pending": 0,
+            "reviewed": 1,
+            "failed": 0,
+            "total": 1,
+        }
+
+        with client.app.state.database.session() as session:
+            versions = list(
+                session.scalars(
+                    select(TableAnnotation)
+                    .where(TableAnnotation.page_id == page_id)
+                    .order_by(TableAnnotation.created_at)
+                ).all()
+            )
+            assert len(versions) == 2
+            assert versions[0].source == "MODEL"
+            assert versions[0].is_active is False
+            assert versions[1].source == "HUMAN"
+            assert versions[1].is_active is True

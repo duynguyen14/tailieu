@@ -1,0 +1,7 @@
+-r requirements.txt
+
+Pillow>=11.0,<13.0
+numpy>=1.26,<3.0
+
+# CPU runtime. For CUDA, install onnxruntime-gpu instead of onnxruntime.
+onnxruntime>=1.20,<2.0
