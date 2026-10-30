@@ -27,22 +27,21 @@ IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
 
-class PadToSquare:
-    def __init__(self, fill: int = 255) -> None:
+class ResizePadToSquare:
+    """Resize a page to the model input and pad it without a large intermediate image."""
+
+    def __init__(self, size: int, fill: int = 255) -> None:
+        self.size = size
         self.fill = fill
 
     def __call__(self, image: Image.Image) -> Image.Image:
-        width, height = image.size
-        side = max(width, height)
-        horizontal = side - width
-        vertical = side - height
-        border = (
-            horizontal // 2,
-            vertical // 2,
-            horizontal - horizontal // 2,
-            vertical - vertical // 2,
+        return ImageOps.pad(
+            image,
+            (self.size, self.size),
+            method=Image.Resampling.BICUBIC,
+            color=self.fill,
+            centering=(0.5, 0.5),
         )
-        return ImageOps.expand(image, border=border, fill=self.fill)
 
 
 class ManifestDataset(Dataset[tuple[torch.Tensor, int]]):
@@ -120,7 +119,10 @@ def select_device(preference: str, gpu_device_id: int) -> torch.device:
 def build_transforms(image_size: int) -> tuple[transforms.Compose, transforms.Compose]:
     train_transform = transforms.Compose(
         [
-            PadToSquare(),
+            # Reduce the high-resolution scan before augmentation. Running affine and
+            # colour transforms on the original multi-megapixel PNG makes the CPU the
+            # bottleneck while the GPU waits for the next batch.
+            ResizePadToSquare(image_size),
             transforms.RandomAffine(
                 degrees=2.0,
                 translate=(0.02, 0.02),
@@ -129,23 +131,13 @@ def build_transforms(image_size: int) -> tuple[transforms.Compose, transforms.Co
                 interpolation=InterpolationMode.BILINEAR,
             ),
             transforms.ColorJitter(brightness=0.12, contrast=0.12),
-            transforms.Resize(
-                (image_size, image_size),
-                interpolation=InterpolationMode.BICUBIC,
-                antialias=True,
-            ),
             transforms.ToTensor(),
             transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
         ]
     )
     eval_transform = transforms.Compose(
         [
-            PadToSquare(),
-            transforms.Resize(
-                (image_size, image_size),
-                interpolation=InterpolationMode.BICUBIC,
-                antialias=True,
-            ),
+            ResizePadToSquare(image_size),
             transforms.ToTensor(),
             transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
         ]
