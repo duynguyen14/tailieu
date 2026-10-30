@@ -11,7 +11,7 @@ build/
 *.egg-info/
 tmp/
 output/
-models/
+/models/
 
 # Local scanned documents and generated document images.
 /CamScanner-260703105539000/
