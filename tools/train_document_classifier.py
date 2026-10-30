@@ -17,6 +17,7 @@ from torch import nn
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from torchvision.transforms import InterpolationMode
+from tqdm.auto import tqdm
 
 from tools.document_classifier_config import DocumentClassifierSettings
 from tools.document_classifier_model import build_mobilenet_v3_small
@@ -187,6 +188,7 @@ def run_epoch(
     optimizer: torch.optim.Optimizer | None,
     scaler: torch.amp.GradScaler | None,
     use_amp: bool,
+    progress_description: str,
 ) -> tuple[float, list[int], list[int]]:
     training = optimizer is not None
     model.train(training)
@@ -194,7 +196,16 @@ def run_epoch(
     targets: list[int] = []
     predictions: list[int] = []
 
-    for images, labels in loader:
+    progress = tqdm(
+        loader,
+        desc=progress_description,
+        unit="batch",
+        dynamic_ncols=True,
+        leave=False,
+        mininterval=0.5,
+    )
+    processed_samples = 0
+    for images, labels in progress:
         images = images.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
         if training:
@@ -216,8 +227,20 @@ def run_epoch(
                 scaler.update()
 
         total_loss += loss.item() * labels.size(0)
+        processed_samples += labels.size(0)
         targets.extend(labels.detach().cpu().tolist())
         predictions.extend(logits.argmax(dim=1).detach().cpu().tolist())
+
+        postfix: dict[str, str] = {
+            "loss": f"{total_loss / processed_samples:.4f}",
+        }
+        if optimizer is not None:
+            postfix["lr"] = f"{optimizer.param_groups[0]['lr']:.2e}"
+        if device.type == "cuda":
+            allocated_gb = torch.cuda.memory_allocated(device) / (1024**3)
+            reserved_gb = torch.cuda.memory_reserved(device) / (1024**3)
+            postfix["vram"] = f"{allocated_gb:.1f}/{reserved_gb:.1f}GB"
+        progress.set_postfix(postfix, refresh=False)
 
     return total_loss / len(loader.dataset), targets, predictions
 
@@ -343,6 +366,7 @@ def main() -> None:
             optimizer=optimizer,
             scaler=scaler,
             use_amp=use_amp,
+            progress_description=f"Train {epoch:03d}/{config.train_epochs:03d}",
         )
         val_loss, val_targets, val_predictions = run_epoch(
             model=model,
@@ -352,6 +376,7 @@ def main() -> None:
             optimizer=None,
             scaler=None,
             use_amp=use_amp,
+            progress_description=f"Val   {epoch:03d}/{config.train_epochs:03d}",
         )
         train_metrics = metric_summary(
             train_targets, train_predictions, len(class_to_index)
@@ -413,6 +438,7 @@ def main() -> None:
         optimizer=None,
         scaler=None,
         use_amp=use_amp,
+        progress_description="Test",
     )
     label_indexes = list(range(len(class_to_index)))
     target_names = [index_to_class[index] for index in label_indexes]

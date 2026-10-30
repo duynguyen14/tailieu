@@ -9,6 +9,7 @@ numpy>=1.26,<3.0
 torch>=2.5,<3.0
 torchvision>=0.20,<1.0
 scikit-learn>=1.5,<2.0
+tqdm>=4.67,<5.0
 
 # ONNX export and validation
 onnx>=1.17,<2.0

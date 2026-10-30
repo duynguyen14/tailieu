@@ -8,6 +8,7 @@ không được upload bởi các script.
 - `tools/export_reviewed_dataset.py`: đọc các page `REVIEWED` từ SQL Server, kiểm tra
   ảnh, loại ảnh trùng hoàn toàn và xuất dataset.
 - `tools/train_document_classifier.py`: fine-tune MobileNetV3-Small bằng CPU hoặc CUDA.
+  Terminal hiển thị progress bar theo batch, loss, learning rate, ETA và VRAM CUDA.
 - `tools/export_classifier_onnx.py`: chuyển checkpoint tốt nhất thành ONNX và tạo
   `labels.json` dùng cho inference.
 - `requirements-training.txt`: dependency tách riêng khỏi API runtime.
