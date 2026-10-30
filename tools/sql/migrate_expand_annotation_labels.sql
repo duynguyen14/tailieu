@@ -28,6 +28,7 @@ ALTER TABLE dbo.annotation_pages WITH CHECK
             N'PASSPORT_FRONT',
             N'PASSPORT_BACK',
             N'VISA_STICKER',
+            N'VISA_REQUEST_OFFICIAL_LETTER',
             N'OTHER'
         )
     );

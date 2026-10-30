@@ -68,6 +68,11 @@ LABELS = [
         description="Trang hộ chiếu có tem hoặc nhãn thị thực được dán.",
     ),
     LabelDefinition(
+        code="VISA_REQUEST_OFFICIAL_LETTER",
+        display_name="Công văn đề nghị cấp thị thực",
+        description="Công văn của cơ quan nhà nước đề nghị cấp thị thực hoặc hỗ trợ nhập cảnh.",
+    ),
+    LabelDefinition(
         code="OTHER",
         display_name="Tài liệu khác",
         description="Trang không thuộc các nhóm tài liệu đã định nghĩa.",

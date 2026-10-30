@@ -103,7 +103,8 @@ BEGIN
             (label IS NULL OR label IN
                 (N'DIPLOMATIC_NOTE', N'APPLICANT_TABLE', N'APPLICANT_LIST',
                  N'VISA_APPLICATION_FORM', N'TEMPORARY_RESIDENCE_EXTENSION_FORM',
-                 N'PASSPORT_FRONT', N'PASSPORT_BACK', N'VISA_STICKER', N'OTHER')),
+                 N'PASSPORT_FRONT', N'PASSPORT_BACK', N'VISA_STICKER',
+                 N'VISA_REQUEST_OFFICIAL_LETTER', N'OTHER')),
         CONSTRAINT CK_annotation_pages_review_status CHECK
             (review_status IN (N'UNLABELED', N'REVIEWED'))
     );
