@@ -264,7 +264,6 @@ def test_annotation_labels_are_exactly_the_supported_review_classes() -> None:
         "VISA_APPLICATION_FORM",
         "TEMPORARY_RESIDENCE_EXTENSION_FORM",
         "PASSPORT_FRONT",
-        "PASSPORT_BACK",
         "VISA_STICKER",
         "VISA_REQUEST_OFFICIAL_LETTER",
         "OTHER",

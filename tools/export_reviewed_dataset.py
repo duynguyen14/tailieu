@@ -169,6 +169,46 @@ def split_document_ids(
     return split_by_document
 
 
+def ensure_training_label_coverage(
+    records: list[tuple[SourceRecord, Path, str]],
+    split_by_document: dict[str, str],
+) -> dict[str, str]:
+    """Ensure every observed label has at least one source document in train."""
+
+    labels_by_document: dict[str, set[str]] = defaultdict(set)
+    for record, _, _ in records:
+        labels_by_document[record.document_id].add(record.label)
+
+    observed_labels = set().union(*labels_by_document.values())
+    train_labels: set[str] = set()
+    for document_id, document_labels in labels_by_document.items():
+        if split_by_document[document_id] == "train":
+            train_labels.update(document_labels)
+    missing_labels = observed_labels - train_labels
+    while missing_labels:
+        candidates = [
+            document_id
+            for document_id, labels in labels_by_document.items()
+            if split_by_document[document_id] != "train" and labels & missing_labels
+        ]
+        if not candidates:
+            raise RuntimeError(
+                "Could not place every observed label in the training split: "
+                + ", ".join(sorted(missing_labels))
+            )
+        candidates.sort(
+            key=lambda document_id: (
+                -len(labels_by_document[document_id] & missing_labels),
+                document_id,
+            )
+        )
+        selected_document = candidates[0]
+        split_by_document[selected_document] = "train"
+        train_labels.update(labels_by_document[selected_document])
+        missing_labels = observed_labels - train_labels
+    return split_by_document
+
+
 def copy_file(source: Path, destination: Path, mode: str) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     if mode == "hardlink":
@@ -263,6 +303,10 @@ def export_dataset(
         test_ratio=config.dataset_test_ratio,
         seed=config.dataset_split_seed,
     )
+    split_by_document = ensure_training_label_coverage(
+        unique_records,
+        split_by_document,
+    )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     exported: list[ExportRecord] = []
@@ -331,6 +375,12 @@ def export_dataset(
             split: {label: by_split_label[split].get(label, 0) for label in labels}
             for split in ("train", "val", "test")
         },
+        "labels_missing_from_validation": [
+            label for label in labels if by_split_label["val"].get(label, 0) == 0
+        ],
+        "labels_missing_from_test": [
+            label for label in labels if by_split_label["test"].get(label, 0) == 0
+        ],
         "invalid_items": invalid,
     }
     (output_dir / "statistics.json").write_text(

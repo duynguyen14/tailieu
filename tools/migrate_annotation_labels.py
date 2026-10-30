@@ -59,7 +59,7 @@ def main() -> None:
     finally:
         database.close()
 
-    print("Annotation label constraint now accepts the expanded label set.")
+    print("Annotation label constraint now matches the current supported label set.")
 
 
 if __name__ == "__main__":

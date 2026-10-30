@@ -58,11 +58,6 @@ LABELS = [
         description="Trang hoặc mặt trước của hộ chiếu.",
     ),
     LabelDefinition(
-        code="PASSPORT_BACK",
-        display_name="Hộ chiếu mặt sau",
-        description="Trang hoặc mặt sau của hộ chiếu.",
-    ),
-    LabelDefinition(
         code="VISA_STICKER",
         display_name="Thị thực dán trên hộ chiếu",
         description="Trang hộ chiếu có tem hoặc nhãn thị thực được dán.",

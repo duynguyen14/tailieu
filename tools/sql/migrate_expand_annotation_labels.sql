@@ -26,7 +26,6 @@ ALTER TABLE dbo.annotation_pages WITH CHECK
             N'VISA_APPLICATION_FORM',
             N'TEMPORARY_RESIDENCE_EXTENSION_FORM',
             N'PASSPORT_FRONT',
-            N'PASSPORT_BACK',
             N'VISA_STICKER',
             N'VISA_REQUEST_OFFICIAL_LETTER',
             N'OTHER'
@@ -38,5 +37,5 @@ ALTER TABLE dbo.annotation_pages
     CHECK CONSTRAINT CK_annotation_pages_label;
 GO
 
-PRINT N'Annotation label constraint now accepts the expanded label set.';
+PRINT N'Annotation label constraint now matches the current supported label set.';
 GO
