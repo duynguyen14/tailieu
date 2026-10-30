@@ -1,0 +1,15 @@
+-r requirements.txt
+
+# Local dataset export and image validation
+Pillow>=11.0,<13.0
+numpy>=1.26,<3.0
+
+# Local training. Install the official CUDA-enabled PyTorch build appropriate
+# for the server driver when GPU training is required.
+torch>=2.5,<3.0
+torchvision>=0.20,<1.0
+scikit-learn>=1.5,<2.0
+
+# ONNX export and validation
+onnx>=1.17,<2.0
+
