@@ -59,10 +59,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         description="Synchronous document annotation and extraction API.",
         lifespan=lifespan,
     )
+    cors_origins = settings.cors_origin_list
+    allow_all_origins = "*" in cors_origins
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origin_list,
-        allow_credentials=True,
+        allow_origins=["*"] if allow_all_origins else cors_origins,
+        allow_credentials=not allow_all_origins,
         allow_methods=["*"],
         allow_headers=["*"],
     )

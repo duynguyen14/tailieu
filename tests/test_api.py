@@ -54,6 +54,21 @@ def test_health_reports_synchronous_mode() -> None:
     assert response.json()["processing_mode"] == "synchronous"
 
 
+def test_cors_wildcard_allows_any_origin_without_cookie_credentials() -> None:
+    with _client(cors_origins="*") as client:
+        response = client.options(
+            "/api/v1/health",
+            headers={
+                "Origin": "https://frontend.example.test",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "*"
+    assert "access-control-allow-credentials" not in response.headers
+
+
 def test_model_status_reports_mock_components_loaded() -> None:
     with _client() as client:
         response = client.get("/api/v1/models/status")
