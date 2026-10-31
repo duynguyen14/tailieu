@@ -1,4 +1,7 @@
-from app.models.paddle_ocr_engine import parse_ocr_tokens
+import sys
+
+from app.core.config import Settings
+from app.models.paddle_ocr_engine import parse_ocr_tokens, prepare_paddlex_runtime
 
 
 def test_parse_ocr_tokens_filters_and_sorts_by_geometry() -> None:
@@ -31,3 +34,19 @@ def test_parse_ocr_tokens_builds_bbox_from_polygon() -> None:
 
     assert len(tokens) == 1
     assert tokens[0].bbox == (9, 20, 92, 41)
+
+
+def test_prepare_paddlex_runtime_avoids_optional_modelscope_torch_import(
+    monkeypatch,
+) -> None:
+    monkeypatch.delitem(sys.modules, "modelscope", raising=False)
+    settings = Settings(
+        database_url="sqlite:///:memory:",
+        paddle_pdx_model_source="BOS",
+        paddle_pdx_disable_model_source_check=True,
+    )
+
+    prepare_paddlex_runtime(settings)
+
+    assert sys.modules["modelscope"].__name__ == "modelscope"
+    assert sys.modules["modelscope"].__path__ == []

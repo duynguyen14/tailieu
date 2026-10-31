@@ -108,6 +108,8 @@ class Settings(BaseSettings):
     ocr_cpu_threads: int = Field(default=8, ge=1, le=128)
     ocr_min_confidence: float = Field(default=0.50, ge=0.0, le=1.0)
     ocr_target_page_types: str = "DIPLOMATIC_NOTE,APPLICANT_TABLE,APPLICANT_LIST"
+    paddle_pdx_model_source: str = "BOS"
+    paddle_pdx_disable_model_source_check: bool = True
 
     # Grounded generative extractor. Qwen3-4B with 4-bit QLoRA is the quality /
     # memory balance selected for the RTX 3060 12 GB server.

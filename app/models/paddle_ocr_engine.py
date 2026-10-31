@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import math
+import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 from app.core.config import DevicePreference, Settings
@@ -10,6 +13,34 @@ from app.core.config import DevicePreference, Settings
 
 class OcrModelUnavailableError(RuntimeError):
     pass
+
+
+def prepare_paddlex_runtime(settings: Settings) -> None:
+    """Prevent PaddleX's optional ModelScope downloader from importing Torch.
+
+    Paddle and Torch GPU can bind incompatible cuDNN DLLs on Windows. OCR uses
+    Paddle's BOS model host, so ModelScope is unnecessary even though PaddleX
+    3.7 imports it unconditionally.
+    """
+
+    source = settings.paddle_pdx_model_source.strip() or "BOS"
+    os.environ["PADDLE_PDX_MODEL_SOURCE"] = source
+    os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = (
+        "True" if settings.paddle_pdx_disable_model_source_check else "False"
+    )
+    if source.casefold() != "bos" or "modelscope" in sys.modules:
+        return
+
+    stub = ModuleType("modelscope")
+    stub.__path__ = []  # type: ignore[attr-defined]
+
+    def unavailable_snapshot_download(*_args, **_kwargs):
+        raise RuntimeError(
+            "ModelScope is disabled for Paddle OCR; use PADDLE_PDX_MODEL_SOURCE=BOS."
+        )
+
+    stub.snapshot_download = unavailable_snapshot_download  # type: ignore[attr-defined]
+    sys.modules["modelscope"] = stub
 
 
 @dataclass(frozen=True)
@@ -115,6 +146,7 @@ class PaddleOcrEngine:
         self._settings = settings
         requested = device_override or settings.ocr_runtime_device
         self.effective_device = self._resolve_device(requested)
+        prepare_paddlex_runtime(settings)
         try:
             from paddleocr import PaddleOCR
         except ImportError as exc:
