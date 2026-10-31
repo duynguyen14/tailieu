@@ -325,6 +325,115 @@ def test_grounded_ocr_review_can_skip_page_without_deleting_ocr_run() -> None:
             assert review is not None and review.include_in_llm is False
 
 
+def test_grounded_ocr_review_preserves_vietnamese_unicode_end_to_end() -> None:
+    vietnamese_text = (
+        "Đại Sứ Quán Hoa Kỳ tại Hà Nội kính chào Cục Lãnh Sự "
+        "Bộ Ngoại giao nước Cộng hòa Xã hội Chủ nghĩa Việt Nam"
+    )
+    with _client() as client:
+        imported = client.post(
+            "/api/v1/annotation/documents",
+            files={"file": ("unicode-review.pdf", _two_page_pdf(), "application/pdf")},
+        ).json()
+        page = imported["document"]["pages"][0]
+        run_id = str(uuid4())
+        token_id = str(uuid4())
+        with client.app.state.database.session() as session:
+            session.add(
+                OcrRun(
+                    id=run_id,
+                    page_id=page["id"],
+                    status="COMPLETED",
+                    is_active=True,
+                    model_name="det+rec",
+                    model_version="unicode-test",
+                    device="cpu",
+                )
+            )
+            session.add(
+                OcrToken(
+                    id=token_id,
+                    ocr_run_id=run_id,
+                    token_index=1,
+                    token_id="t_0001",
+                    text="raw OCR",
+                    confidence=Decimal("0.99"),
+                    x1=10,
+                    y1=20,
+                    x2=250,
+                    y2=60,
+                )
+            )
+
+        response = client.put(
+            f"/api/v1/ocr-review/{run_id}/review",
+            json={
+                "reviewed_by": "thai",
+                "include_in_llm": True,
+                "tokens": [
+                    {
+                        "source_token_id": token_id,
+                        "reviewed_text": vietnamese_text,
+                        "reviewed_bbox": [10, 20, 250, 60],
+                    }
+                ],
+                "exclusion_regions": [],
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["tokens"][0]["reviewed_text"] == vietnamese_text
+        first_review_id = response.json()["run"]["review_id"]
+        corrected_text = f"{vietnamese_text}."
+        second_response = client.put(
+            f"/api/v1/ocr-review/{run_id}/review",
+            json={
+                "reviewed_by": "thai",
+                "review_note": "corrected snapshot version",
+                "include_in_llm": True,
+                "tokens": [
+                    {
+                        "source_token_id": token_id,
+                        "reviewed_text": corrected_text,
+                        "reviewed_bbox": [12, 22, 252, 62],
+                    }
+                ],
+                "exclusion_regions": [],
+            },
+        )
+        assert second_response.status_code == 200
+        second_payload = second_response.json()
+        second_review_id = second_payload["run"]["review_id"]
+        assert second_review_id != first_review_id
+        assert second_payload["tokens"][0]["reviewed_text"] == corrected_text
+        assert second_payload["tokens"][0]["reviewed_bbox"] == [12, 22, 252, 62]
+        detail = client.get(f"/api/v1/ocr-review/{run_id}")
+        assert detail.status_code == 200
+        assert detail.json()["tokens"][0]["reviewed_text"] == corrected_text
+        with client.app.state.database.session() as session:
+            reviews = list(
+                session.scalars(
+                    select(OcrReview)
+                    .where(OcrReview.ocr_run_id == run_id)
+                    .order_by(OcrReview.created_at.asc())
+                ).all()
+            )
+            assert len(reviews) == 2
+            assert reviews[0].id == first_review_id
+            assert reviews[0].is_active is False
+            assert reviews[1].id == second_review_id
+            assert reviews[1].parent_review_id == first_review_id
+            assert reviews[1].is_active is True
+            stored = session.scalar(
+                select(OcrReviewToken).where(
+                    OcrReviewToken.review_id == second_review_id,
+                    OcrReviewToken.source_token_id == token_id,
+                )
+            )
+            assert stored is not None
+            assert stored.reviewed_text == corrected_text
+
+
 def test_pending_review_ocr_excludes_reviewed_and_skipped_pages() -> None:
     source = pymupdf.open()
     for text in ("Reviewed note", "Skipped table", "Pending list"):
