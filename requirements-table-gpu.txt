@@ -1,0 +1,7 @@
+# Complete table-structure stack for NVIDIA GPU inference (CUDA 12.6 wheel).
+# Usage: python -m pip install -r requirements-table-gpu.txt
+--extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
+
+-r requirements-table.txt
+paddlepaddle-gpu==3.2.0
+

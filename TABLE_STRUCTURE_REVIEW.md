@@ -37,19 +37,24 @@ The migration is idempotent and does not delete existing rows.
 ## 2. Install table inference dependencies
 
 Install exactly one PaddlePaddle inference engine in the active virtual
-environment. CPU example:
+environment. The wrapper requirement files install both the selected engine
+and the shared table dependencies in one command.
+
+CPU:
 
 ```cmd
-python -m pip install paddlepaddle==3.2.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
-python -m pip install -r requirements-table.txt
+python -m pip install -r requirements-table-cpu.txt
 ```
 
-GPU example for a compatible NVIDIA driver:
+GPU for a compatible NVIDIA driver:
 
 ```cmd
-python -m pip install paddlepaddle-gpu==3.2.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
-python -m pip install -r requirements-table.txt
+python -m pip install -r requirements-table-gpu.txt
 ```
+
+Do not install both wrapper files in the same virtual environment. The base
+`requirements-table.txt` intentionally excludes the Paddle engine so it can be
+shared by CPU and GPU deployments.
 
 Verify the engine:
 

@@ -1,0 +1,7 @@
+# Complete table-structure stack for CPU inference.
+# Usage: python -m pip install -r requirements-table-cpu.txt
+--extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cpu/
+
+-r requirements-table.txt
+paddlepaddle==3.2.0
+
