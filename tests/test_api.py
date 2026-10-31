@@ -368,6 +368,15 @@ def test_second_pass_label_audit_uses_only_first_pass_reviewed_target_pages() ->
             "pending_documents": 1,
             "total_documents": 1,
         }
+        overview = client.get(
+            f"/api/v1/annotation/label-audit/documents/{document_id}/overview"
+        )
+        assert overview.status_code == 200
+        overview_pages = overview.json()["pages"]
+        assert len(overview_pages) == 2
+        assert overview_pages[0]["audit_status"] == "PENDING"
+        assert overview_pages[1]["audit_status"] is None
+        assert overview_pages[1]["page"]["review_status"] == "UNLABELED"
 
 
 def test_second_pass_label_audit_updates_canonical_labels_and_preserves_original() -> None:
@@ -411,6 +420,25 @@ def test_second_pass_label_audit_updates_canonical_labels_and_preserves_original
         assert complete["current"] is None
         assert complete["stats"]["pending_pages"] == 0
         assert complete["stats"]["reviewed_pages"] == 2
+
+        reopened = client.get(
+            f"/api/v1/annotation/label-audit/documents/{document_id}"
+        )
+        assert reopened.status_code == 200
+        reopened_pages = reopened.json()["candidate_pages"]
+        assert [item["audited_label"] for item in reopened_pages] == [
+            "DIPLOMATIC_NOTE",
+            "OTHER",
+        ]
+        previous = client.get("/api/v1/annotation/label-audit/review/previous")
+        assert previous.status_code == 200
+        assert previous.json()["document_id"] == document_id
+        no_earlier = client.get(
+            "/api/v1/annotation/label-audit/review/previous",
+            params={"before_document_id": document_id},
+        )
+        assert no_earlier.status_code == 200
+        assert no_earlier.json() is None
 
         with client.app.state.database.session() as session:
             page_2 = session.get(AnnotationPage, page_2_id)

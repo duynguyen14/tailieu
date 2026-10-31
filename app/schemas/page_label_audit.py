@@ -17,6 +17,7 @@ class PageLabelAuditItem(BaseModel):
     original_label: AnnotationLabel
     audited_label: AnnotationLabel | None
     audit_status: PageLabelAuditStatus
+    audit_note: str | None
     page: AnnotationPageSummary
     image_base64: str
 
@@ -26,6 +27,21 @@ class PageLabelAuditDocument(BaseModel):
     original_filename: str
     document_page_count: int = Field(gt=0)
     candidate_pages: list[PageLabelAuditItem]
+
+
+class PageLabelAuditOverviewItem(BaseModel):
+    page: AnnotationPageSummary
+    image_base64: str
+    original_label: AnnotationLabel | None = None
+    audited_label: AnnotationLabel | None = None
+    audit_status: PageLabelAuditStatus | None = None
+
+
+class PageLabelAuditDocumentOverview(BaseModel):
+    document_id: str
+    original_filename: str
+    document_page_count: int = Field(gt=0)
+    pages: list[PageLabelAuditOverviewItem]
 
 
 class PageLabelAuditStats(BaseModel):

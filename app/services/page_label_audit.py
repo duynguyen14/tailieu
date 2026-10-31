@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import uuid4
 
-from sqlalchemy import func, select, true, update
+from sqlalchemy import and_, func, or_, select, true, update
+from sqlalchemy.orm import selectinload
 
 from app.db.database import Database
 from app.db.models import (
@@ -91,6 +92,101 @@ class PageLabelAuditService:
             ).all()
             records = [PageLabelAuditRecord(audit=row[0], page=row[1]) for row in rows]
             return document, records, stats
+
+    def get_document(
+        self, document_id: str
+    ) -> tuple[AnnotationDocument, list[PageLabelAuditRecord]]:
+        with self._database.session() as session:
+            document = session.get(AnnotationDocument, document_id)
+            if document is None:
+                raise PageLabelAuditNotFoundError("Audit document was not found.")
+            rows = session.execute(
+                select(PageLabelAudit, AnnotationPage)
+                .join(AnnotationPage, AnnotationPage.id == PageLabelAudit.page_id)
+                .where(
+                    AnnotationPage.document_id == document_id,
+                    PageLabelAudit.is_active == true(),
+                )
+                .order_by(AnnotationPage.page_index.asc())
+            ).all()
+            if not rows:
+                raise PageLabelAuditNotFoundError(
+                    "The document has no active second-pass label audit."
+                )
+            return document, [
+                PageLabelAuditRecord(audit=row[0], page=row[1]) for row in rows
+            ]
+
+    def get_document_overview(
+        self, document_id: str
+    ) -> tuple[AnnotationDocument, dict[str, PageLabelAudit]]:
+        with self._database.session() as session:
+            document = session.scalar(
+                select(AnnotationDocument)
+                .options(selectinload(AnnotationDocument.pages))
+                .where(AnnotationDocument.id == document_id)
+            )
+            if document is None:
+                raise PageLabelAuditNotFoundError("Audit document was not found.")
+            audits = list(
+                session.scalars(
+                    select(PageLabelAudit)
+                    .join(AnnotationPage, AnnotationPage.id == PageLabelAudit.page_id)
+                    .where(
+                        AnnotationPage.document_id == document_id,
+                        PageLabelAudit.is_active == true(),
+                    )
+                ).all()
+            )
+            return document, {audit.page_id: audit for audit in audits}
+
+    def get_previous_document(
+        self, before_document_id: str | None
+    ) -> tuple[AnnotationDocument, list[PageLabelAuditRecord]] | None:
+        reviewed_documents = (
+            select(
+                AnnotationPage.document_id.label("document_id"),
+                func.max(PageLabelAudit.audited_at).label("audited_at"),
+            )
+            .join(PageLabelAudit, PageLabelAudit.page_id == AnnotationPage.id)
+            .where(
+                PageLabelAudit.is_active == true(),
+                PageLabelAudit.audit_status == "REVIEWED",
+            )
+            .group_by(AnnotationPage.document_id)
+            .subquery()
+        )
+        with self._database.session() as session:
+            statement = select(reviewed_documents.c.document_id)
+            if before_document_id:
+                reference_time = session.scalar(
+                    select(reviewed_documents.c.audited_at).where(
+                        reviewed_documents.c.document_id == before_document_id
+                    )
+                )
+                if reference_time is None:
+                    statement = statement.where(
+                        reviewed_documents.c.document_id != before_document_id
+                    )
+                else:
+                    statement = statement.where(
+                        or_(
+                            reviewed_documents.c.audited_at < reference_time,
+                            and_(
+                                reviewed_documents.c.audited_at == reference_time,
+                                reviewed_documents.c.document_id < before_document_id,
+                            ),
+                        )
+                    )
+            document_id = session.scalar(
+                statement.order_by(
+                    reviewed_documents.c.audited_at.desc(),
+                    reviewed_documents.c.document_id.desc(),
+                ).limit(1)
+            )
+        if document_id is None:
+            return None
+        return self.get_document(document_id)
 
     def read_page_image(self, page: AnnotationPage) -> bytes:
         return self._storage.read_bytes(page.image_relative_path)
