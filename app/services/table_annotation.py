@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from decimal import Decimal
 from uuid import uuid4
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, true, update
 from sqlalchemy.orm import selectinload
 
 from app.db.database import Database
@@ -73,7 +73,7 @@ class TableAnnotationService:
                 .where(
                     TableAnnotation.page_id == AnnotationPage.id,
                     TableAnnotation.source == TableAnnotationSource.HUMAN.value,
-                    TableAnnotation.is_active.is_(True),
+                    TableAnnotation.is_active == true(),
                 )
                 .exists()
             )
@@ -83,7 +83,7 @@ class TableAnnotationService:
                     select(TableAnnotation.id)
                     .where(
                         TableAnnotation.page_id == AnnotationPage.id,
-                        TableAnnotation.is_active.is_(True),
+                        TableAnnotation.is_active == true(),
                     )
                     .exists()
                 )
@@ -117,7 +117,7 @@ class TableAnnotationService:
             active = session.scalar(
                 select(TableAnnotation).where(
                     TableAnnotation.page_id == page_id,
-                    TableAnnotation.is_active.is_(True),
+                    TableAnnotation.is_active == true(),
                 )
             )
             if active is not None:
@@ -189,7 +189,7 @@ class TableAnnotationService:
             pending_filter = (
                 TableAnnotation.source == TableAnnotationSource.MODEL.value,
                 TableAnnotation.status == TableAnnotationStatus.PREDICTED.value,
-                TableAnnotation.is_active.is_(True),
+                TableAnnotation.is_active == true(),
             )
             pending = session.scalar(
                 select(func.count(TableAnnotation.id)).where(*pending_filter)
@@ -198,13 +198,13 @@ class TableAnnotationService:
                 select(func.count(TableAnnotation.id)).where(
                     TableAnnotation.source == TableAnnotationSource.HUMAN.value,
                     TableAnnotation.status == TableAnnotationStatus.REVIEWED.value,
-                    TableAnnotation.is_active.is_(True),
+                    TableAnnotation.is_active == true(),
                 )
             ) or 0
             failed = session.scalar(
                 select(func.count(TableAnnotation.id)).where(
                     TableAnnotation.status == TableAnnotationStatus.FAILED.value,
-                    TableAnnotation.is_active.is_(True),
+                    TableAnnotation.is_active == true(),
                 )
             ) or 0
             annotation = session.scalar(
@@ -250,7 +250,7 @@ class TableAnnotationService:
                 update(TableAnnotation)
                 .where(
                     TableAnnotation.page_id == current.page_id,
-                    TableAnnotation.is_active.is_(True),
+                    TableAnnotation.is_active == true(),
                 )
                 .values(is_active=False, updated_at=utc_now())
             )
