@@ -9,7 +9,9 @@ from app.db.database import Database
 from app.db.models import (
     AnnotationDocument,
     AnnotationPage,
+    OcrLayoutRegion,
     OcrReview,
+    OcrReviewRegion,
     OcrReviewToken,
     OcrRun,
     OcrToken,
@@ -18,6 +20,7 @@ from app.db.models import (
 from app.schemas.ocr_review import (
     OcrReviewDetail,
     OcrReviewPageInfo,
+    OcrReviewRegionView,
     OcrReviewRequest,
     OcrReviewRunInfo,
     OcrReviewStats,
@@ -114,6 +117,26 @@ class OcrReviewService:
                 raise OcrReviewValidationError(
                     f"Review contains tokens from another OCR run: {unknown}."
                 )
+            source_regions = {
+                region.id: region
+                for region in session.scalars(
+                    select(OcrLayoutRegion).where(OcrLayoutRegion.ocr_run_id == run.id)
+                ).all()
+            }
+            submitted_region_sources = [
+                region.source_region_id
+                for region in payload.exclusion_regions
+                if region.source_region_id is not None
+            ]
+            if len(submitted_region_sources) != len(set(submitted_region_sources)):
+                raise OcrReviewValidationError(
+                    "A source exclusion region can appear only once in a review."
+                )
+            unknown_regions = sorted(set(submitted_region_sources) - set(source_regions))
+            if unknown_regions:
+                raise OcrReviewValidationError(
+                    f"Review contains regions from another OCR run: {unknown_regions}."
+                )
             for token in payload.tokens:
                 text = token.reviewed_text.strip()
                 if not text:
@@ -122,6 +145,13 @@ class OcrReviewService:
                 if x2 > page.width or y2 > page.height:
                     raise OcrReviewValidationError(
                         f"Token bbox {token.reviewed_bbox} exceeds page dimensions "
+                        f"{page.width}x{page.height}."
+                    )
+            for region in payload.exclusion_regions:
+                x1, y1, x2, y2 = region.reviewed_bbox
+                if x2 > page.width or y2 > page.height:
+                    raise OcrReviewValidationError(
+                        f"Region bbox {region.reviewed_bbox} exceeds page dimensions "
                         f"{page.width}x{page.height}."
                     )
 
@@ -161,6 +191,23 @@ class OcrReviewService:
                         y1=y1,
                         x2=x2,
                         y2=y2,
+                        include_in_extraction=token.include_in_extraction,
+                        ignored_reason=token.ignored_reason,
+                    )
+                )
+            for order, region in enumerate(payload.exclusion_regions, start=1):
+                x1, y1, x2, y2 = region.reviewed_bbox
+                session.add(
+                    OcrReviewRegion(
+                        id=str(uuid4()),
+                        review_id=review.id,
+                        source_region_id=region.source_region_id,
+                        region_order=order,
+                        region_type=region.region_type,
+                        x1=x1,
+                        y1=y1,
+                        x2=x2,
+                        y2=y2,
                     )
                 )
             session.flush()
@@ -181,6 +228,14 @@ class OcrReviewService:
             ).all()
         )
         raw_by_id = {token.id: token for token in raw_tokens}
+        raw_regions = list(
+            session.scalars(
+                select(OcrLayoutRegion)
+                .where(OcrLayoutRegion.ocr_run_id == run.id)
+                .order_by(OcrLayoutRegion.region_index.asc())
+            ).all()
+        )
+        raw_region_by_id = {region.id: region for region in raw_regions}
         review = session.scalar(
             select(OcrReview).where(
                 OcrReview.ocr_run_id == run.id,
@@ -190,6 +245,7 @@ class OcrReviewService:
 
         if review is None:
             tokens = [self._raw_token_view(token) for token in raw_tokens]
+            exclusion_regions = [self._raw_region_view(region) for region in raw_regions]
         else:
             reviewed_tokens = list(
                 session.scalars(
@@ -201,6 +257,19 @@ class OcrReviewService:
             tokens = [
                 self._reviewed_token_view(token, raw_by_id.get(token.source_token_id))
                 for token in reviewed_tokens
+            ]
+            reviewed_regions = list(
+                session.scalars(
+                    select(OcrReviewRegion)
+                    .where(OcrReviewRegion.review_id == review.id)
+                    .order_by(OcrReviewRegion.region_order.asc())
+                ).all()
+            )
+            exclusion_regions = [
+                self._reviewed_region_view(
+                    region, raw_region_by_id.get(region.source_region_id)
+                )
+                for region in reviewed_regions
             ]
 
         return OcrReviewDetail(
@@ -232,6 +301,7 @@ class OcrReviewService:
                 self._storage.read_bytes(page.image_relative_path)
             ).decode("ascii"),
             tokens=tokens,
+            exclusion_regions=exclusion_regions,
         )
 
     @staticmethod
@@ -245,6 +315,9 @@ class OcrReviewService:
             confidence=float(token.confidence),
             reviewed_text=token.text,
             reviewed_bbox=bbox,
+            raw_include_in_extraction=token.include_in_extraction,
+            include_in_extraction=token.include_in_extraction,
+            ignored_reason=token.ignored_reason,
             is_human_added=False,
             is_changed=False,
         )
@@ -265,10 +338,51 @@ class OcrReviewService:
             confidence=float(source.confidence) if source else None,
             reviewed_text=token.reviewed_text,
             reviewed_bbox=reviewed_bbox,
+            raw_include_in_extraction=(source.include_in_extraction if source else None),
+            include_in_extraction=token.include_in_extraction,
+            ignored_reason=token.ignored_reason,
             is_human_added=source is None,
             is_changed=(
                 source is None
                 or token.reviewed_text != source.text
+                or reviewed_bbox != raw_bbox
+                or token.include_in_extraction != source.include_in_extraction
+            ),
+        )
+
+    @staticmethod
+    def _raw_region_view(region: OcrLayoutRegion) -> OcrReviewRegionView:
+        bbox = (region.x1, region.y1, region.x2, region.y2)
+        return OcrReviewRegionView(
+            source_region_id=region.id,
+            region_type=region.region_type,
+            source="MODEL",
+            confidence=float(region.confidence),
+            raw_bbox=bbox,
+            reviewed_bbox=bbox,
+            is_human_added=False,
+            is_changed=False,
+        )
+
+    @staticmethod
+    def _reviewed_region_view(
+        region: OcrReviewRegion, source: OcrLayoutRegion | None
+    ) -> OcrReviewRegionView:
+        reviewed_bbox = (region.x1, region.y1, region.x2, region.y2)
+        raw_bbox = (
+            (source.x1, source.y1, source.x2, source.y2) if source is not None else None
+        )
+        return OcrReviewRegionView(
+            source_region_id=region.source_region_id,
+            region_type=region.region_type,
+            source="MODEL" if source is not None else "HUMAN",
+            confidence=float(source.confidence) if source is not None else None,
+            raw_bbox=raw_bbox,
+            reviewed_bbox=reviewed_bbox,
+            is_human_added=source is None,
+            is_changed=(
+                source is None
+                or region.region_type != source.region_type
                 or reviewed_bbox != raw_bbox
             ),
         )

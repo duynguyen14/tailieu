@@ -1,6 +1,11 @@
 import sys
 
 from app.core.config import Settings
+from app.models.paddle_layout_detector import (
+    LayoutRegionPrediction,
+    token_exclusion_reason,
+    token_overlap_ratio,
+)
 from app.models.paddle_ocr_engine import parse_ocr_tokens, prepare_paddlex_runtime
 
 
@@ -50,3 +55,15 @@ def test_prepare_paddlex_runtime_avoids_optional_modelscope_torch_import(
 
     assert sys.modules["modelscope"].__name__ == "modelscope"
     assert sys.modules["modelscope"].__path__ == []
+
+
+def test_seal_overlap_uses_token_area_and_only_ignores_above_threshold() -> None:
+    seal = LayoutRegionPrediction("SEAL", 0.98, (100, 100, 220, 220))
+
+    assert token_overlap_ratio((120, 130, 180, 160), seal.bbox) == 1.0
+    assert token_exclusion_reason(
+        (120, 130, 180, 160), [seal], threshold=0.70
+    ) == "INSIDE_SEAL"
+    assert token_exclusion_reason(
+        (40, 130, 180, 160), [seal], threshold=0.70
+    ) is None

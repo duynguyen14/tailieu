@@ -108,6 +108,12 @@ class Settings(BaseSettings):
     ocr_cpu_threads: int = Field(default=8, ge=1, le=128)
     ocr_min_confidence: float = Field(default=0.50, ge=0.0, le=1.0)
     ocr_target_page_types: str = "DIPLOMATIC_NOTE,APPLICANT_TABLE,APPLICANT_LIST"
+    ocr_enable_exclusion_detection: bool = True
+    ocr_layout_model_name: str = "PP-DocLayout-L"
+    ocr_layout_model_dir: Path | None = None
+    ocr_layout_threshold: float = Field(default=0.50, ge=0.0, le=1.0)
+    ocr_exclusion_region_types: str = "seal"
+    ocr_auto_ignore_overlap: float = Field(default=0.70, ge=0.0, le=1.0)
     paddle_pdx_model_source: str = "BOS"
     paddle_pdx_disable_model_source_check: bool = True
 
@@ -165,6 +171,7 @@ class Settings(BaseSettings):
         "table_structure_model_dir",
         "ocr_detection_model_dir",
         "ocr_recognition_model_dir",
+        "ocr_layout_model_dir",
         mode="before",
     )
     @classmethod
@@ -196,6 +203,14 @@ class Settings(BaseSettings):
         return [
             item.strip().upper()
             for item in self.ocr_target_page_types.split(",")
+            if item.strip()
+        ]
+
+    @property
+    def ocr_exclusion_region_type_list(self) -> list[str]:
+        return [
+            item.strip().upper()
+            for item in self.ocr_exclusion_region_types.split(",")
             if item.strip()
         ]
 

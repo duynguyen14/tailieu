@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-
 from decimal import Decimal
 
 from sqlalchemy import (
@@ -270,6 +269,11 @@ class OcrRun(Base):
         cascade="all, delete-orphan",
         order_by="OcrToken.token_index",
     )
+    layout_regions: Mapped[list[OcrLayoutRegion]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+        order_by="OcrLayoutRegion.region_index",
+    )
 
 
 class OcrToken(Base):
@@ -301,11 +305,48 @@ class OcrToken(Base):
     x2: Mapped[int] = mapped_column(Integer, nullable=False)
     y2: Mapped[int] = mapped_column(Integer, nullable=False)
     polygon_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    include_in_extraction: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    ignored_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
 
     run: Mapped[OcrRun] = relationship(back_populates="tokens")
+
+
+class OcrLayoutRegion(Base):
+    __tablename__ = "ocr_layout_regions"
+    __table_args__ = (
+        UniqueConstraint("ocr_run_id", "region_index", name="uq_ocr_layout_region_index"),
+        CheckConstraint("region_index >= 1", name="ck_ocr_layout_region_index"),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1",
+            name="ck_ocr_layout_region_confidence",
+        ),
+        CheckConstraint(
+            "x1 >= 0 AND y1 >= 0 AND x2 > x1 AND y2 > y1",
+            name="ck_ocr_layout_region_bbox",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    ocr_run_id: Mapped[str] = mapped_column(
+        ForeignKey("ocr_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    region_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    region_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(9, 6), nullable=False)
+    x1: Mapped[int] = mapped_column(Integer, nullable=False)
+    y1: Mapped[int] = mapped_column(Integer, nullable=False)
+    x2: Mapped[int] = mapped_column(Integer, nullable=False)
+    y2: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+    run: Mapped[OcrRun] = relationship(back_populates="layout_regions")
 
 
 class OcrReview(Base):
@@ -356,6 +397,39 @@ class OcrReviewToken(Base):
     )
     token_order: Mapped[int] = mapped_column(Integer, nullable=False)
     reviewed_text: Mapped[str] = mapped_column(Text, nullable=False)
+    x1: Mapped[int] = mapped_column(Integer, nullable=False)
+    y1: Mapped[int] = mapped_column(Integer, nullable=False)
+    x2: Mapped[int] = mapped_column(Integer, nullable=False)
+    y2: Mapped[int] = mapped_column(Integer, nullable=False)
+    include_in_extraction: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    ignored_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+
+class OcrReviewRegion(Base):
+    __tablename__ = "ocr_review_regions"
+    __table_args__ = (
+        UniqueConstraint("review_id", "region_order", name="uq_ocr_review_region_order"),
+        CheckConstraint("region_order >= 1", name="ck_ocr_review_region_order"),
+        CheckConstraint(
+            "x1 >= 0 AND y1 >= 0 AND x2 > x1 AND y2 > y1",
+            name="ck_ocr_review_region_bbox",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    review_id: Mapped[str] = mapped_column(
+        ForeignKey("ocr_reviews.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_region_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ocr_layout_regions.id"), nullable=True, index=True
+    )
+    region_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    region_type: Mapped[str] = mapped_column(String(32), nullable=False)
     x1: Mapped[int] = mapped_column(Integer, nullable=False)
     y1: Mapped[int] = mapped_column(Integer, nullable=False)
     x2: Mapped[int] = mapped_column(Integer, nullable=False)

@@ -16,7 +16,9 @@ from app.core.config import PROJECT_ROOT, Settings
 from app.db.models import (
     AnnotationDocument,
     AnnotationPage,
+    OcrLayoutRegion,
     OcrReview,
+    OcrReviewRegion,
     OcrReviewToken,
     OcrRun,
     OcrToken,
@@ -146,6 +148,19 @@ def test_grounded_ocr_review_preserves_raw_and_saves_corrected_snapshot() -> Non
                         y1=50,
                         x2=130,
                         y2=70,
+                        include_in_extraction=False,
+                        ignored_reason="INSIDE_SEAL",
+                    ),
+                    OcrLayoutRegion(
+                        id=str(uuid4()),
+                        ocr_run_id=run_id,
+                        region_index=1,
+                        region_type="SEAL",
+                        confidence=Decimal("0.97"),
+                        x1=5,
+                        y1=45,
+                        x2=140,
+                        y2=75,
                     ),
                 ]
             )
@@ -157,6 +172,10 @@ def test_grounded_ocr_review_preserves_raw_and_saves_corrected_snapshot() -> Non
         assert current["run"]["device"] == "gpu:0"
         assert current["tokens"][0]["raw_text"] == "RF02I053O"
         assert current["tokens"][0]["reviewed_text"] == "RF02I053O"
+        assert current["tokens"][1]["include_in_extraction"] is False
+        assert current["tokens"][1]["ignored_reason"] == "INSIDE_SEAL"
+        assert current["exclusion_regions"][0]["region_type"] == "SEAL"
+        source_region_id = current["exclusion_regions"][0]["source_region_id"]
 
         reviewed = client.put(
             f"/api/v1/ocr-review/{run_id}/review",
@@ -170,10 +189,24 @@ def test_grounded_ocr_review_preserves_raw_and_saves_corrected_snapshot() -> Non
                         "reviewed_bbox": [8, 18, 122, 42],
                     },
                     {
+                        "source_token_id": second_token_id,
+                        "reviewed_text": "false positive",
+                        "reviewed_bbox": [10, 50, 130, 70],
+                        "include_in_extraction": False,
+                        "ignored_reason": "INSIDE_SEAL",
+                    },
+                    {
                         "source_token_id": None,
                         "reviewed_text": "Added missing line",
                         "reviewed_bbox": [10, 80, 150, 100],
                     },
+                ],
+                "exclusion_regions": [
+                    {
+                        "source_region_id": source_region_id,
+                        "region_type": "SEAL",
+                        "reviewed_bbox": [5, 45, 140, 75],
+                    }
                 ],
             },
         )
@@ -183,7 +216,10 @@ def test_grounded_ocr_review_preserves_raw_and_saves_corrected_snapshot() -> Non
         assert result["tokens"][0]["raw_text"] == "RF02I053O"
         assert result["tokens"][0]["reviewed_text"] == "RF0210530"
         assert result["tokens"][0]["is_changed"] is True
-        assert result["tokens"][1]["is_human_added"] is True
+        assert result["tokens"][1]["is_human_added"] is False
+        assert result["tokens"][1]["include_in_extraction"] is False
+        assert result["tokens"][2]["is_human_added"] is True
+        assert len(result["exclusion_regions"]) == 1
 
         completed_queue = client.get("/api/v1/ocr-review/review/next").json()
         assert completed_queue["current"] is None
@@ -201,13 +237,17 @@ def test_grounded_ocr_review_preserves_raw_and_saves_corrected_snapshot() -> Non
                     select(OcrReviewToken).order_by(OcrReviewToken.token_order)
                 ).all()
             )
+            review_regions = list(session.scalars(select(OcrReviewRegion)).all())
             assert raw_first is not None and raw_first.text == "RF02I053O"
             assert raw_second is not None and raw_second.text == "false positive"
             assert active_review is not None
             assert [token.reviewed_text for token in review_tokens] == [
                 "RF0210530",
+                "false positive",
                 "Added missing line",
             ]
+            assert review_tokens[1].include_in_extraction is False
+            assert review_regions[0].region_type == "SEAL"
 
 
 def test_extract_returns_two_typed_pages() -> None:

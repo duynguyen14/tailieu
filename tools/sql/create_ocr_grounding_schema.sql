@@ -58,6 +58,9 @@ BEGIN
         x2           INT           NOT NULL,
         y2           INT           NOT NULL,
         polygon_json NVARCHAR(MAX) NULL,
+        include_in_extraction BIT NOT NULL
+            CONSTRAINT DF_ocr_tokens_include DEFAULT (1),
+        ignored_reason NVARCHAR(64) NULL,
         created_at   DATETIMEOFFSET(7) NOT NULL
             CONSTRAINT DF_ocr_tokens_created_at DEFAULT SYSUTCDATETIME(),
 
@@ -70,6 +73,48 @@ BEGIN
         CONSTRAINT CK_ocr_tokens_confidence CHECK
             (confidence >= 0 AND confidence <= 1),
         CONSTRAINT CK_ocr_tokens_bbox CHECK
+            (x1 >= 0 AND y1 >= 0 AND x2 > x1 AND y2 > y1)
+    );
+END;
+GO
+
+IF COL_LENGTH(N'dbo.ocr_tokens', N'include_in_extraction') IS NULL
+BEGIN
+    ALTER TABLE dbo.ocr_tokens ADD include_in_extraction BIT NOT NULL
+        CONSTRAINT DF_ocr_tokens_include DEFAULT (1) WITH VALUES;
+END;
+GO
+
+IF COL_LENGTH(N'dbo.ocr_tokens', N'ignored_reason') IS NULL
+BEGIN
+    ALTER TABLE dbo.ocr_tokens ADD ignored_reason NVARCHAR(64) NULL;
+END;
+GO
+
+IF OBJECT_ID(N'dbo.ocr_layout_regions', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.ocr_layout_regions
+    (
+        id           NVARCHAR(36) NOT NULL,
+        ocr_run_id   NVARCHAR(36) NOT NULL,
+        region_index INT          NOT NULL,
+        region_type  NVARCHAR(32) NOT NULL,
+        confidence   DECIMAL(9,6) NOT NULL,
+        x1           INT          NOT NULL,
+        y1           INT          NOT NULL,
+        x2           INT          NOT NULL,
+        y2           INT          NOT NULL,
+        created_at   DATETIMEOFFSET(7) NOT NULL
+            CONSTRAINT DF_ocr_layout_regions_created_at DEFAULT SYSUTCDATETIME(),
+
+        CONSTRAINT PK_ocr_layout_regions PRIMARY KEY (id),
+        CONSTRAINT FK_ocr_layout_regions_run FOREIGN KEY (ocr_run_id)
+            REFERENCES dbo.ocr_runs(id) ON DELETE CASCADE,
+        CONSTRAINT UQ_ocr_layout_regions_run_index UNIQUE (ocr_run_id, region_index),
+        CONSTRAINT CK_ocr_layout_regions_index CHECK (region_index >= 1),
+        CONSTRAINT CK_ocr_layout_regions_confidence CHECK
+            (confidence >= 0 AND confidence <= 1),
+        CONSTRAINT CK_ocr_layout_regions_bbox CHECK
             (x1 >= 0 AND y1 >= 0 AND x2 > x1 AND y2 > y1)
     );
 END;
@@ -118,6 +163,9 @@ BEGIN
         y1               INT           NOT NULL,
         x2               INT           NOT NULL,
         y2               INT           NOT NULL,
+        include_in_extraction BIT      NOT NULL
+            CONSTRAINT DF_ocr_review_tokens_include DEFAULT (1),
+        ignored_reason   NVARCHAR(64)  NULL,
         created_at       DATETIMEOFFSET(7) NOT NULL
             CONSTRAINT DF_ocr_review_tokens_created_at DEFAULT SYSUTCDATETIME(),
 
@@ -129,6 +177,48 @@ BEGIN
         CONSTRAINT UQ_ocr_review_tokens_order UNIQUE (review_id, token_order),
         CONSTRAINT CK_ocr_review_tokens_order CHECK (token_order >= 1),
         CONSTRAINT CK_ocr_review_tokens_bbox CHECK
+            (x1 >= 0 AND y1 >= 0 AND x2 > x1 AND y2 > y1)
+    );
+END;
+GO
+
+IF COL_LENGTH(N'dbo.ocr_review_tokens', N'include_in_extraction') IS NULL
+BEGIN
+    ALTER TABLE dbo.ocr_review_tokens ADD include_in_extraction BIT NOT NULL
+        CONSTRAINT DF_ocr_review_tokens_include DEFAULT (1) WITH VALUES;
+END;
+GO
+
+IF COL_LENGTH(N'dbo.ocr_review_tokens', N'ignored_reason') IS NULL
+BEGIN
+    ALTER TABLE dbo.ocr_review_tokens ADD ignored_reason NVARCHAR(64) NULL;
+END;
+GO
+
+IF OBJECT_ID(N'dbo.ocr_review_regions', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.ocr_review_regions
+    (
+        id               NVARCHAR(36) NOT NULL,
+        review_id        NVARCHAR(36) NOT NULL,
+        source_region_id NVARCHAR(36) NULL,
+        region_order     INT          NOT NULL,
+        region_type      NVARCHAR(32) NOT NULL,
+        x1               INT          NOT NULL,
+        y1               INT          NOT NULL,
+        x2               INT          NOT NULL,
+        y2               INT          NOT NULL,
+        created_at       DATETIMEOFFSET(7) NOT NULL
+            CONSTRAINT DF_ocr_review_regions_created_at DEFAULT SYSUTCDATETIME(),
+
+        CONSTRAINT PK_ocr_review_regions PRIMARY KEY (id),
+        CONSTRAINT FK_ocr_review_regions_review FOREIGN KEY (review_id)
+            REFERENCES dbo.ocr_reviews(id) ON DELETE CASCADE,
+        CONSTRAINT FK_ocr_review_regions_source FOREIGN KEY (source_region_id)
+            REFERENCES dbo.ocr_layout_regions(id),
+        CONSTRAINT UQ_ocr_review_regions_order UNIQUE (review_id, region_order),
+        CONSTRAINT CK_ocr_review_regions_order CHECK (region_order >= 1),
+        CONSTRAINT CK_ocr_review_regions_bbox CHECK
             (x1 >= 0 AND y1 >= 0 AND x2 > x1 AND y2 > y1)
     );
 END;

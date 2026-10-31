@@ -15,11 +15,17 @@ from app.db.models import (
     AnnotationPage,
     DocumentCase,
     DocumentCasePage,
+    OcrLayoutRegion,
     OcrRun,
     OcrToken,
     utc_now,
 )
 from app.models.paddle_ocr_engine import OcrTokenPrediction, PaddleOcrEngine
+from app.models.paddle_layout_detector import (
+    LayoutRegionPrediction,
+    PaddleLayoutDetector,
+    token_exclusion_reason,
+)
 from app.schemas.annotation import ReviewStatus
 from app.services.storage import AnnotationStorage
 
@@ -124,6 +130,8 @@ def complete_run(
     *,
     run_id: str,
     tokens: list[OcrTokenPrediction],
+    regions: list[LayoutRegionPrediction],
+    auto_ignore_overlap: float,
     processing_time_ms: int,
 ) -> None:
     with database.session() as session:
@@ -131,7 +139,24 @@ def complete_run(
         if run is None:
             raise RuntimeError(f"OCR run disappeared: {run_id}")
         run.tokens.clear()
+        run.layout_regions.clear()
+        for region_index, region in enumerate(regions, start=1):
+            run.layout_regions.append(
+                OcrLayoutRegion(
+                    id=str(uuid4()),
+                    region_index=region_index,
+                    region_type=region.region_type,
+                    confidence=Decimal(str(region.confidence)),
+                    x1=region.bbox[0],
+                    y1=region.bbox[1],
+                    x2=region.bbox[2],
+                    y2=region.bbox[3],
+                )
+            )
         for token in tokens:
+            ignored_reason = token_exclusion_reason(
+                token.bbox, regions, threshold=auto_ignore_overlap
+            )
             run.tokens.append(
                 OcrToken(
                     id=str(uuid4()),
@@ -144,6 +169,8 @@ def complete_run(
                     x2=token.bbox[2],
                     y2=token.bbox[3],
                     polygon_json=json.dumps(token.polygon, ensure_ascii=False),
+                    include_in_extraction=ignored_reason is None,
+                    ignored_reason=ignored_reason,
                 )
             )
         run.status = "COMPLETED"
@@ -189,32 +216,47 @@ def run(args: argparse.Namespace) -> OcrSummary:
 
         device = DevicePreference(args.device) if args.device else None
         engine = PaddleOcrEngine(settings, device_override=device)
+        layout_detector = (
+            PaddleLayoutDetector(settings, device=engine.effective_device)
+            if settings.ocr_enable_exclusion_detection
+            else None
+        )
         print(
-            f"Loaded {engine.model_name} on {engine.effective_device}; pages={len(pages)}"
+            f"Loaded {engine.model_name} on {engine.effective_device}; pages={len(pages)}; "
+            f"exclusion_layout={layout_detector.model_name if layout_detector else 'disabled'}"
         )
         for position, page in enumerate(pages, start=1):
             started = time.perf_counter()
             run_id = start_run(
                 database,
                 page_id=page.id,
-                model_name=engine.model_name,
+                model_name=(
+                    f"{engine.model_name}|layout={layout_detector.model_name}"
+                    if layout_detector
+                    else engine.model_name
+                ),
                 model_version=settings.ocr_model_version,
                 device=engine.effective_device,
             )
             try:
-                tokens = engine.predict(storage.resolve(page.image_relative_path))
+                image_path = storage.resolve(page.image_relative_path)
+                regions = layout_detector.predict(image_path) if layout_detector else []
+                tokens = engine.predict(image_path)
                 elapsed_ms = round((time.perf_counter() - started) * 1000)
                 complete_run(
                     database,
                     run_id=run_id,
                     tokens=tokens,
+                    regions=regions,
+                    auto_ignore_overlap=settings.ocr_auto_ignore_overlap,
                     processing_time_ms=elapsed_ms,
                 )
                 summary.completed += 1
                 summary.tokens += len(tokens)
                 print(
                     f"[{position}/{len(pages)}] page={page.id} "
-                    f"tokens={len(tokens)} time={elapsed_ms}ms"
+                    f"tokens={len(tokens)} exclusion_regions={len(regions)} "
+                    f"time={elapsed_ms}ms"
                 )
             except Exception as exc:
                 elapsed_ms = round((time.perf_counter() - started) * 1000)

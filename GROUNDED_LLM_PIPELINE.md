@@ -65,6 +65,12 @@ OCR_MODEL_VERSION=pp-ocrv6-medium-v1
 OCR_ENABLE_HPI=false
 OCR_CPU_THREADS=8
 OCR_MIN_CONFIDENCE=0.50
+OCR_ENABLE_EXCLUSION_DETECTION=true
+OCR_LAYOUT_MODEL_NAME=PP-DocLayout-L
+OCR_LAYOUT_MODEL_DIR=
+OCR_LAYOUT_THRESHOLD=0.50
+OCR_EXCLUSION_REGION_TYPES=seal
+OCR_AUTO_IGNORE_OVERLAP=0.70
 OCR_TARGET_PAGE_TYPES=DIPLOMATIC_NOTE,APPLICANT_TABLE,APPLICANT_LIST
 
 LLM_BASE_MODEL_ID=Qwen/Qwen3-4B
@@ -161,6 +167,18 @@ Run all remaining eligible pages after checking the first batch:
 
 ```cmd
 python -m tools.run_grounded_ocr --device auto
+```
+
+OCR vẫn lưu toàn bộ token gốc. `PP-DocLayout-L` phát hiện vùng `SEAL`; token có
+ít nhất 70% diện tích nằm trong vùng đó được lưu với
+`include_in_extraction=false` và không được xuất sang LLM. Tab Grounded OCR
+Review cho phép khôi phục token hoặc khoanh thêm vùng `SEAL`, `SIGNATURE`,
+`LOGO`.
+
+Để chạy lại các trang đã OCR trước khi có bước lọc vùng:
+
+```bat
+python -m tools.run_grounded_ocr --device cuda --force
 ```
 
 ## 8. Produce case-level annotation seeds

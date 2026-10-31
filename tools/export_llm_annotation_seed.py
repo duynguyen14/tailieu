@@ -198,6 +198,8 @@ def main() -> None:
             for review in reviews:
                 tokens: list[ReviewedExportToken] = []
                 for token in reviewed_tokens_by_review.get(review.id, []):
+                    if not token.include_in_extraction:
+                        continue
                     source = raw_by_id.get(token.source_token_id or "")
                     token_code = (
                         source.token_id
