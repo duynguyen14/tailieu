@@ -435,6 +435,23 @@ def test_pending_review_ocr_excludes_reviewed_and_skipped_pages() -> None:
                 ]
             )
 
+        history_page_1 = client.get(
+            "/api/v1/ocr-review/history",
+            params={"page": 1, "page_size": 1},
+        ).json()
+        history_page_2 = client.get(
+            "/api/v1/ocr-review/history",
+            params={"page": 2, "page_size": 1},
+        ).json()
+        assert history_page_1["page"] == 1
+        assert history_page_2["page"] == 2
+        assert history_page_1["page_size"] == 1
+        assert history_page_1["total_items"] == 2
+        assert history_page_1["total_pages"] == 2
+        assert len(history_page_1["items"]) == 1
+        assert len(history_page_2["items"]) == 1
+        assert history_page_1["items"][0]["review_id"] != history_page_2["items"][0]["review_id"]
+
         pages = eligible_pages(
             client.app.state.database,
             page_types=["DIPLOMATIC_NOTE", "APPLICANT_TABLE", "APPLICANT_LIST"],
