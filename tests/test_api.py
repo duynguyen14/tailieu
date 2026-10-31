@@ -224,6 +224,23 @@ def test_grounded_ocr_review_preserves_raw_and_saves_corrected_snapshot() -> Non
         assert result["tokens"][2]["is_human_added"] is True
         assert len(result["exclusion_regions"]) == 1
 
+        history = client.get(
+            "/api/v1/ocr-review/history",
+            params={"page": 1, "page_size": 1, "decision": "APPROVED"},
+        )
+        assert history.status_code == 200
+        history_payload = history.json()
+        assert history_payload["page"] == 1
+        assert history_payload["page_size"] == 1
+        assert history_payload["total_items"] == 1
+        assert history_payload["total_pages"] == 1
+        assert history_payload["items"][0]["run_id"] == run_id
+        assert history_payload["items"][0]["decision"] == "APPROVED"
+        assert history_payload["items"][0]["token_count"] == 3
+        assert history_payload["items"][0]["included_token_count"] == 2
+        assert history_payload["items"][0]["ignored_token_count"] == 1
+        assert history_payload["items"][0]["human_added_token_count"] == 1
+
         completed_queue = client.get("/api/v1/ocr-review/review/next").json()
         assert completed_queue["current"] is None
         assert completed_queue["stats"]["pending"] == 0
@@ -287,6 +304,15 @@ def test_grounded_ocr_review_can_skip_page_without_deleting_ocr_run() -> None:
 
         assert response.status_code == 200
         assert response.json()["run"]["include_in_llm"] is False
+        skipped_history = client.get(
+            "/api/v1/ocr-review/history",
+            params={"decision": "SKIPPED", "filename": "skip-ocr"},
+        )
+        assert skipped_history.status_code == 200
+        skipped_payload = skipped_history.json()
+        assert skipped_payload["total_items"] == 1
+        assert skipped_payload["items"][0]["decision"] == "SKIPPED"
+        assert skipped_payload["items"][0]["reviewed_by"] == "thai"
         queue = client.get("/api/v1/ocr-review/review/next").json()
         assert queue["current"] is None
         assert queue["stats"]["skipped"] == 1

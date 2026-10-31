@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -131,3 +131,33 @@ class OcrReviewStats(BaseModel):
 class OcrReviewQueueResponse(BaseModel):
     current: OcrReviewDetail | None
     stats: OcrReviewStats
+
+
+OcrReviewDecision = Literal["APPROVED", "SKIPPED"]
+
+
+class OcrReviewHistoryItem(BaseModel):
+    review_id: str
+    run_id: str
+    page_id: str
+    document_id: str
+    original_filename: str
+    document_page_count: int = Field(gt=0)
+    page_number: int = Field(gt=0)
+    page_type: AnnotationLabel | None
+    decision: OcrReviewDecision
+    reviewed_by: str
+    review_note: str | None
+    reviewed_at: datetime
+    token_count: int = Field(ge=0)
+    included_token_count: int = Field(ge=0)
+    ignored_token_count: int = Field(ge=0)
+    human_added_token_count: int = Field(ge=0)
+
+
+class OcrReviewHistoryResponse(BaseModel):
+    items: list[OcrReviewHistoryItem]
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1)
+    total_items: int = Field(ge=0)
+    total_pages: int = Field(ge=0)

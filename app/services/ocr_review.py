@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import base64
+import math
 from uuid import uuid4
 
-from sqlalchemy import false, func, select, true
+from sqlalchemy import case, false, func, select, true
 
 from app.db.database import Database
 from app.db.models import (
@@ -19,6 +20,8 @@ from app.db.models import (
 )
 from app.schemas.ocr_review import (
     OcrReviewDetail,
+    OcrReviewHistoryItem,
+    OcrReviewHistoryResponse,
     OcrReviewPageInfo,
     OcrReviewRegionView,
     OcrReviewRequest,
@@ -77,6 +80,131 @@ class OcrReviewService:
             if run is None:
                 raise OcrReviewNotFoundError("OCR run was not found.")
             return self._detail(session, run)
+
+    def get_history(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        decision: str,
+        filename: str | None,
+        page_type: str | None,
+        reviewed_by: str | None,
+    ) -> OcrReviewHistoryResponse:
+        filters = [
+            OcrReview.is_active == true(),
+            OcrRun.is_active == true(),
+        ]
+        if decision == "APPROVED":
+            filters.append(OcrReview.include_in_llm == true())
+        elif decision == "SKIPPED":
+            filters.append(OcrReview.include_in_llm == false())
+        if filename:
+            filters.append(
+                func.lower(AnnotationDocument.original_filename).like(
+                    f"%{filename.strip().lower()}%"
+                )
+            )
+        if page_type:
+            filters.append(AnnotationPage.label == page_type)
+        if reviewed_by:
+            filters.append(
+                func.lower(OcrReview.reviewed_by).like(
+                    f"%{reviewed_by.strip().lower()}%"
+                )
+            )
+
+        joins = (
+            (OcrRun, OcrRun.id == OcrReview.ocr_run_id),
+            (AnnotationPage, AnnotationPage.id == OcrRun.page_id),
+            (
+                AnnotationDocument,
+                AnnotationDocument.id == AnnotationPage.document_id,
+            ),
+        )
+        with self._database.session() as session:
+            count_statement = select(func.count(OcrReview.id)).select_from(OcrReview)
+            for model, condition in joins:
+                count_statement = count_statement.join(model, condition)
+            total_items = session.scalar(count_statement.where(*filters)) or 0
+
+            statement = select(
+                OcrReview,
+                OcrRun,
+                AnnotationPage,
+                AnnotationDocument,
+            ).select_from(OcrReview)
+            for model, condition in joins:
+                statement = statement.join(model, condition)
+            rows = session.execute(
+                statement
+                .where(*filters)
+                .order_by(OcrReview.reviewed_at.desc(), OcrReview.id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            ).all()
+
+            review_ids = [review.id for review, _, _, _ in rows]
+            token_counts: dict[str, tuple[int, int, int]] = {}
+            if review_ids:
+                count_rows = session.execute(
+                    select(
+                        OcrReviewToken.review_id,
+                        func.count(OcrReviewToken.id),
+                        func.sum(
+                            case(
+                                (OcrReviewToken.include_in_extraction == true(), 1),
+                                else_=0,
+                            )
+                        ),
+                        func.sum(
+                            case(
+                                (OcrReviewToken.source_token_id.is_(None), 1),
+                                else_=0,
+                            )
+                        ),
+                    )
+                    .where(OcrReviewToken.review_id.in_(review_ids))
+                    .group_by(OcrReviewToken.review_id)
+                ).all()
+                token_counts = {
+                    review_id: (int(total), int(included or 0), int(added or 0))
+                    for review_id, total, included, added in count_rows
+                }
+
+            items = []
+            for review, run, annotation_page, document in rows:
+                total, included, added = token_counts.get(review.id, (0, 0, 0))
+                items.append(
+                    OcrReviewHistoryItem(
+                        review_id=review.id,
+                        run_id=run.id,
+                        page_id=annotation_page.id,
+                        document_id=document.id,
+                        original_filename=document.original_filename,
+                        document_page_count=document.page_count,
+                        page_number=annotation_page.page_number,
+                        page_type=annotation_page.label,
+                        decision=(
+                            "APPROVED" if review.include_in_llm else "SKIPPED"
+                        ),
+                        reviewed_by=review.reviewed_by,
+                        review_note=review.review_note,
+                        reviewed_at=review.reviewed_at,
+                        token_count=total,
+                        included_token_count=included,
+                        ignored_token_count=total - included,
+                        human_added_token_count=added,
+                    )
+                )
+
+        return OcrReviewHistoryResponse(
+            items=items,
+            page=page,
+            page_size=page_size,
+            total_items=total_items,
+            total_pages=math.ceil(total_items / page_size) if total_items else 0,
+        )
 
     def review(self, *, run_id: str, payload: OcrReviewRequest) -> OcrReviewDetail:
         reviewer = payload.reviewed_by.strip()
