@@ -12,6 +12,8 @@ from app.schemas.page_label_audit import (
     PageLabelAuditItem,
     PageLabelAuditOverviewItem,
     PageLabelAuditQueueResponse,
+    PageLabelAuditRelabelRequest,
+    PageLabelAuditRelabelResponse,
     PageLabelAuditReviewRequest,
     PageLabelAuditReviewResponse,
 )
@@ -131,12 +133,49 @@ def get_page_label_audit_document_overview(
                         if page.id in audit_by_page
                         else None
                     ),
+                    audit_note=(
+                        audit_by_page[page.id].audit_note
+                        if page.id in audit_by_page
+                        else None
+                    ),
                 )
                 for page in document.pages
             ],
         )
     except PageLabelAuditNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.put(
+    "/documents/{document_id}/pages/{page_number}",
+    response_model=PageLabelAuditRelabelResponse,
+)
+def relabel_page_from_overview(
+    request: Request,
+    document_id: str,
+    page_number: int,
+    payload: PageLabelAuditRelabelRequest,
+) -> PageLabelAuditRelabelResponse:
+    try:
+        record = _service(request).relabel_overview_page(
+            document_id=document_id,
+            page_number=page_number,
+            label=payload.label,
+            reviewed_by=payload.reviewed_by,
+            audit_note=payload.audit_note,
+        )
+        return PageLabelAuditRelabelResponse(
+            audit_id=record.audit.id,
+            original_label=record.audit.original_label,
+            audited_label=record.audit.audited_label,
+            audit_status=record.audit.audit_status,
+            audit_note=record.audit.audit_note,
+            page=AnnotationPageSummary.model_validate(record.page),
+        )
+    except PageLabelAuditNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PageLabelAuditValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.put(

@@ -261,6 +261,88 @@ class PageLabelAuditService:
             )
             return len(rows)
 
+    def relabel_overview_page(
+        self,
+        *,
+        document_id: str,
+        page_number: int,
+        label: AnnotationLabel,
+        reviewed_by: str,
+        audit_note: str | None,
+    ) -> PageLabelAuditRecord:
+        """Human-correct any first-pass reviewed page from the full-PDF overview.
+
+        Unlike queue seeding, this explicit action accepts every supported label.
+        It preserves the label that existed before the second-pass correction in
+        ``original_label`` and updates ``annotation_pages.label`` as the canonical
+        human label.
+        """
+
+        reviewer = reviewed_by.strip()
+        if not reviewer:
+            raise PageLabelAuditValidationError("Reviewer name cannot be empty.")
+
+        with self._database.session() as session:
+            document = session.get(AnnotationDocument, document_id)
+            if document is None:
+                raise PageLabelAuditNotFoundError("Audit document was not found.")
+            page = session.scalar(
+                select(AnnotationPage).where(
+                    AnnotationPage.document_id == document_id,
+                    AnnotationPage.page_number == page_number,
+                )
+            )
+            if page is None:
+                raise PageLabelAuditNotFoundError(
+                    f"Page {page_number} was not found in the audit document."
+                )
+            if (
+                page.review_status != ReviewStatus.REVIEWED.value
+                or page.label is None
+            ):
+                raise PageLabelAuditValidationError(
+                    "Only a page reviewed by a human in the first pass can be relabeled here."
+                )
+
+            audit = session.scalar(
+                select(PageLabelAudit).where(
+                    PageLabelAudit.page_id == page.id,
+                    PageLabelAudit.is_active == true(),
+                )
+            )
+            if audit is None:
+                audit = PageLabelAudit(
+                    id=str(uuid4()),
+                    page_id=page.id,
+                    original_label=page.label,
+                    audited_label=None,
+                    audit_status="PENDING",
+                    is_active=True,
+                    source_reviewed_at=page.reviewed_at,
+                )
+                session.add(audit)
+
+            now = utc_now()
+            audit.audited_label = label.value
+            audit.audit_status = "REVIEWED"
+            audit.audited_by = reviewer
+            audit.audit_note = audit_note.strip() if audit_note else None
+            audit.audited_at = now
+            audit.updated_at = now
+            page.label = label.value
+            page.updated_at = now
+
+            session.execute(
+                update(DocumentCase)
+                .where(
+                    DocumentCase.document_id == document_id,
+                    DocumentCase.is_active == true(),
+                )
+                .values(is_active=False, updated_at=now)
+            )
+            session.flush()
+            return PageLabelAuditRecord(audit=audit, page=page)
+
     def _seed_pending_candidates(self, session) -> int:
         active_audit_exists = (
             select(PageLabelAudit.id)

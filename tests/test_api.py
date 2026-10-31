@@ -377,6 +377,60 @@ def test_second_pass_label_audit_uses_only_first_pass_reviewed_target_pages() ->
         assert overview_pages[0]["audit_status"] == "PENDING"
         assert overview_pages[1]["audit_status"] is None
         assert overview_pages[1]["page"]["review_status"] == "UNLABELED"
+        rejected = client.put(
+            f"/api/v1/annotation/label-audit/documents/{document_id}/pages/2",
+            json={"label": "APPLICANT_LIST", "reviewed_by": "thai"},
+        )
+        assert rejected.status_code == 400
+
+
+def test_full_pdf_overview_can_relabel_an_old_non_target_human_label() -> None:
+    with _client() as client:
+        imported = client.post(
+            "/api/v1/annotation/documents",
+            files={"file": ("overview-relabel.pdf", _two_page_pdf(), "application/pdf")},
+        ).json()
+        document_id = imported["document"]["id"]
+        page_2_id = imported["document"]["pages"][1]["id"]
+        client.put(
+            f"/api/v1/annotation/documents/{document_id}/pages/1/review",
+            json={"label": "DIPLOMATIC_NOTE", "reviewed_by": "first-reviewer"},
+        )
+        client.put(
+            f"/api/v1/annotation/documents/{document_id}/pages/2/review",
+            json={"label": "OTHER", "reviewed_by": "first-reviewer"},
+        )
+
+        # Seed the document audit with the target page. The old OTHER page is
+        # intentionally absent until a human corrects it from the overview.
+        queued = client.get("/api/v1/annotation/label-audit/review/next").json()
+        assert len(queued["current"]["candidate_pages"]) == 1
+
+        corrected = client.put(
+            f"/api/v1/annotation/label-audit/documents/{document_id}/pages/2",
+            json={
+                "label": "APPLICANT_LIST",
+                "reviewed_by": "thai",
+                "audit_note": "Nhãn cũ bị gán nhầm",
+            },
+        )
+        assert corrected.status_code == 200
+        payload = corrected.json()
+        assert payload["original_label"] == "OTHER"
+        assert payload["audited_label"] == "APPLICANT_LIST"
+        assert payload["audit_status"] == "REVIEWED"
+        assert payload["page"]["label"] == "APPLICANT_LIST"
+
+        reopened = client.get(
+            f"/api/v1/annotation/label-audit/documents/{document_id}"
+        ).json()
+        assert len(reopened["candidate_pages"]) == 2
+        corrected_item = next(
+            item for item in reopened["candidate_pages"] if item["page"]["id"] == page_2_id
+        )
+        assert corrected_item["original_label"] == "OTHER"
+        assert corrected_item["audited_label"] == "APPLICANT_LIST"
+        assert corrected_item["audit_note"] == "Nhãn cũ bị gán nhầm"
 
 
 def test_second_pass_label_audit_updates_canonical_labels_and_preserves_original() -> None:

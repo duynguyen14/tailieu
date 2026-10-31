@@ -35,6 +35,7 @@ class PageLabelAuditOverviewItem(BaseModel):
     original_label: AnnotationLabel | None = None
     audited_label: AnnotationLabel | None = None
     audit_status: PageLabelAuditStatus | None = None
+    audit_note: str | None = None
 
 
 class PageLabelAuditDocumentOverview(BaseModel):
@@ -71,3 +72,18 @@ class PageLabelAuditReviewRequest(BaseModel):
 class PageLabelAuditReviewResponse(BaseModel):
     document_id: str
     reviewed_pages: int = Field(ge=1)
+
+
+class PageLabelAuditRelabelRequest(BaseModel):
+    label: AnnotationLabel
+    reviewed_by: str = Field(min_length=1, max_length=100)
+    audit_note: str | None = Field(default=None, max_length=2000)
+
+
+class PageLabelAuditRelabelResponse(BaseModel):
+    audit_id: str
+    original_label: AnnotationLabel
+    audited_label: AnnotationLabel
+    audit_status: PageLabelAuditStatus
+    audit_note: str | None
+    page: AnnotationPageSummary
