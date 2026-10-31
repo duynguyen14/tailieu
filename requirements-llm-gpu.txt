@@ -1,0 +1,12 @@
+-r requirements.txt
+
+# Qwen3 QLoRA / local model download. Install the matching CUDA PyTorch wheel
+# separately first; this file intentionally does not replace an existing torch.
+transformers>=4.51,<6.0
+accelerate>=1.6,<2.0
+peft>=0.15,<1.0
+trl>=0.16,<1.0
+datasets>=3.5,<5.0
+bitsandbytes>=0.45,<1.0
+huggingface-hub>=0.30,<2.0
+safetensors>=0.5,<1.0

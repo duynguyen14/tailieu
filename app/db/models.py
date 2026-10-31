@@ -92,6 +92,187 @@ class AnnotationPage(Base):
     document: Mapped[AnnotationDocument] = relationship(back_populates="pages")
 
 
+class DocumentCase(Base):
+    __tablename__ = "document_cases"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('AUTO_GROUPED', 'NEEDS_REVIEW', 'REVIEWED')",
+            name="ck_document_case_status",
+        ),
+        CheckConstraint("case_index >= 1", name="ck_document_case_index"),
+        CheckConstraint(
+            "start_page_number >= 1 AND end_page_number >= start_page_number",
+            name="ck_document_case_page_range",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("annotation_documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    case_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    start_page_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_page_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    document: Mapped[AnnotationDocument] = relationship()
+    pages: Mapped[list[DocumentCasePage]] = relationship(
+        back_populates="case",
+        cascade="all, delete-orphan",
+        order_by="DocumentCasePage.page_order",
+    )
+    extraction_annotations: Mapped[list[CaseExtractionAnnotation]] = relationship(
+        back_populates="case",
+        cascade="all, delete-orphan",
+        order_by="CaseExtractionAnnotation.created_at",
+    )
+
+
+class DocumentCasePage(Base):
+    __tablename__ = "document_case_pages"
+    __table_args__ = (
+        UniqueConstraint("case_id", "page_id", name="uq_document_case_page"),
+        UniqueConstraint("case_id", "page_order", name="uq_document_case_page_order"),
+        CheckConstraint("page_order >= 1", name="ck_document_case_page_order"),
+        CheckConstraint(
+            "page_role IN ('NOTE', 'APPLICANT_DATA')",
+            name="ck_document_case_page_role",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    case_id: Mapped[str] = mapped_column(
+        ForeignKey("document_cases.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    page_id: Mapped[str] = mapped_column(
+        ForeignKey("annotation_pages.id"), nullable=False, index=True
+    )
+    page_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    page_role: Mapped[str] = mapped_column(String(24), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+    case: Mapped[DocumentCase] = relationship(back_populates="pages")
+    page: Mapped[AnnotationPage] = relationship()
+
+
+class CaseExtractionAnnotation(Base):
+    __tablename__ = "case_extraction_annotations"
+    __table_args__ = (
+        CheckConstraint(
+            "review_status IN ('NEEDS_LABEL', 'REVIEWED')",
+            name="ck_case_extraction_review_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    case_id: Mapped[str] = mapped_column(
+        ForeignKey("document_cases.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    schema_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    target_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    review_status: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="NEEDS_LABEL", index=True
+    )
+    reviewed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    case: Mapped[DocumentCase] = relationship(back_populates="extraction_annotations")
+
+
+class OcrRun(Base):
+    __tablename__ = "ocr_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('PROCESSING', 'COMPLETED', 'FAILED')",
+            name="ck_ocr_run_status",
+        ),
+        CheckConstraint(
+            "processing_time_ms IS NULL OR processing_time_ms >= 0",
+            name="ck_ocr_run_processing_time",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    page_id: Mapped[str] = mapped_column(
+        ForeignKey("annotation_pages.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    model_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    model_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    device: Mapped[str] = mapped_column(String(32), nullable=False)
+    processing_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    page: Mapped[AnnotationPage] = relationship()
+    tokens: Mapped[list[OcrToken]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+        order_by="OcrToken.token_index",
+    )
+
+
+class OcrToken(Base):
+    __tablename__ = "ocr_tokens"
+    __table_args__ = (
+        UniqueConstraint("ocr_run_id", "token_index", name="uq_ocr_token_index"),
+        UniqueConstraint("ocr_run_id", "token_id", name="uq_ocr_token_id"),
+        CheckConstraint("token_index >= 1", name="ck_ocr_token_index"),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1",
+            name="ck_ocr_token_confidence",
+        ),
+        CheckConstraint(
+            "x1 >= 0 AND y1 >= 0 AND x2 > x1 AND y2 > y1",
+            name="ck_ocr_token_bbox",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    ocr_run_id: Mapped[str] = mapped_column(
+        ForeignKey("ocr_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    token_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(9, 6), nullable=False)
+    x1: Mapped[int] = mapped_column(Integer, nullable=False)
+    y1: Mapped[int] = mapped_column(Integer, nullable=False)
+    x2: Mapped[int] = mapped_column(Integer, nullable=False)
+    y2: Mapped[int] = mapped_column(Integer, nullable=False)
+    polygon_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+    run: Mapped[OcrRun] = relationship(back_populates="tokens")
+
+
 class TableAnnotation(Base):
     __tablename__ = "table_annotations"
     __table_args__ = (

@@ -1,0 +1,10 @@
+# GPU OCR stack for PP-OCRv6 on CUDA 12.6-compatible NVIDIA drivers.
+# Remove the CPU `paddlepaddle` package before installing this file.
+--extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
+
+-r requirements.txt
+Pillow>=11.0,<13.0
+numpy>=1.26,<3.0
+paddleocr==3.7.0
+paddlepaddle-gpu==3.3.1
+

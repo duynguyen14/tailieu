@@ -93,6 +93,38 @@ class Settings(BaseSettings):
     table_enable_hpi: bool = False
     table_assume_first_row_header: bool = True
 
+    # GPU-first OCR used to create grounded LLM inputs. PaddleOCR returns text,
+    # confidence and source boxes; the LLM must cite token IDs instead of
+    # generating coordinates itself.
+    ocr_runtime_device: DevicePreference = DevicePreference.AUTO
+    ocr_runtime_gpu_device_id: int = Field(default=0, ge=0)
+    ocr_runtime_allow_cpu_fallback: bool = True
+    ocr_detection_model_name: str = "PP-OCRv6_medium_det"
+    ocr_recognition_model_name: str = "PP-OCRv6_medium_rec"
+    ocr_detection_model_dir: Path | None = None
+    ocr_recognition_model_dir: Path | None = None
+    ocr_model_version: str = "pp-ocrv6-medium-v1"
+    ocr_enable_hpi: bool = False
+    ocr_cpu_threads: int = Field(default=8, ge=1, le=128)
+    ocr_min_confidence: float = Field(default=0.50, ge=0.0, le=1.0)
+    ocr_target_page_types: str = "DIPLOMATIC_NOTE,APPLICANT_TABLE,APPLICANT_LIST"
+
+    # Grounded generative extractor. Qwen3-4B with 4-bit QLoRA is the quality /
+    # memory balance selected for the RTX 3060 12 GB server.
+    llm_base_model_id: str = "Qwen/Qwen3-4B"
+    llm_base_model_dir: Path = Path("models/llm/qwen3-4b")
+    llm_device: DevicePreference = DevicePreference.AUTO
+    llm_gpu_device_id: int = Field(default=0, ge=0)
+    llm_load_in_4bit: bool = True
+    llm_max_sequence_length: int = Field(default=4096, ge=512, le=32768)
+    llm_schema_version: str = "document-case-v1"
+    llm_dataset_dir: Path = Path("data/training/grounded_llm")
+    llm_train_batch_size: int = Field(default=1, ge=1, le=16)
+    llm_gradient_accumulation_steps: int = Field(default=8, ge=1, le=128)
+    llm_lora_rank: int = Field(default=16, ge=1, le=256)
+    llm_lora_alpha: int = Field(default=32, ge=1, le=512)
+    llm_lora_dropout: float = Field(default=0.05, ge=0.0, le=0.5)
+
     pdf_dpi: int = Field(default=200, ge=72, le=400)
     max_file_size_mb: int = Field(default=30, ge=1, le=500)
     max_pages: int = Field(default=50, ge=1, le=1000)
@@ -129,6 +161,8 @@ class Settings(BaseSettings):
         "table_structure_model_path",
         "table_layout_model_dir",
         "table_structure_model_dir",
+        "ocr_detection_model_dir",
+        "ocr_recognition_model_dir",
         mode="before",
     )
     @classmethod
@@ -154,6 +188,24 @@ class Settings(BaseSettings):
     @property
     def mock_page_type_list(self) -> list[str]:
         return [item.strip().upper() for item in self.mock_page_types.split(",") if item.strip()]
+
+    @property
+    def ocr_target_page_type_list(self) -> list[str]:
+        return [
+            item.strip().upper()
+            for item in self.ocr_target_page_types.split(",")
+            if item.strip()
+        ]
+
+    @property
+    def llm_base_model_path(self) -> Path:
+        path = self.llm_base_model_dir
+        return path.resolve() if path.is_absolute() else (PROJECT_ROOT / path).resolve()
+
+    @property
+    def llm_dataset_path(self) -> Path:
+        path = self.llm_dataset_dir
+        return path.resolve() if path.is_absolute() else (PROJECT_ROOT / path).resolve()
 
     @property
     def annotation_storage_path(self) -> Path:
