@@ -75,6 +75,91 @@ BEGIN
 END;
 GO
 
+IF OBJECT_ID(N'dbo.ocr_reviews', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.ocr_reviews
+    (
+        id               NVARCHAR(36)   NOT NULL,
+        ocr_run_id       NVARCHAR(36)   NOT NULL,
+        parent_review_id NVARCHAR(36)   NULL,
+        status           NVARCHAR(20)   NOT NULL
+            CONSTRAINT DF_ocr_reviews_status DEFAULT N'REVIEWED',
+        is_active        BIT            NOT NULL
+            CONSTRAINT DF_ocr_reviews_is_active DEFAULT (1),
+        reviewed_by      NVARCHAR(100)  NOT NULL,
+        review_note      NVARCHAR(MAX)  NULL,
+        reviewed_at      DATETIMEOFFSET(7) NOT NULL
+            CONSTRAINT DF_ocr_reviews_reviewed_at DEFAULT SYSUTCDATETIME(),
+        created_at       DATETIMEOFFSET(7) NOT NULL
+            CONSTRAINT DF_ocr_reviews_created_at DEFAULT SYSUTCDATETIME(),
+        updated_at       DATETIMEOFFSET(7) NOT NULL
+            CONSTRAINT DF_ocr_reviews_updated_at DEFAULT SYSUTCDATETIME(),
+
+        CONSTRAINT PK_ocr_reviews PRIMARY KEY (id),
+        CONSTRAINT FK_ocr_reviews_run FOREIGN KEY (ocr_run_id)
+            REFERENCES dbo.ocr_runs(id) ON DELETE CASCADE,
+        CONSTRAINT FK_ocr_reviews_parent FOREIGN KEY (parent_review_id)
+            REFERENCES dbo.ocr_reviews(id),
+        CONSTRAINT CK_ocr_reviews_status CHECK (status IN (N'REVIEWED'))
+    );
+END;
+GO
+
+IF OBJECT_ID(N'dbo.ocr_review_tokens', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.ocr_review_tokens
+    (
+        id               NVARCHAR(36)  NOT NULL,
+        review_id        NVARCHAR(36)  NOT NULL,
+        source_token_id  NVARCHAR(36)  NULL,
+        token_order      INT           NOT NULL,
+        reviewed_text    NVARCHAR(MAX) NOT NULL,
+        x1               INT           NOT NULL,
+        y1               INT           NOT NULL,
+        x2               INT           NOT NULL,
+        y2               INT           NOT NULL,
+        created_at       DATETIMEOFFSET(7) NOT NULL
+            CONSTRAINT DF_ocr_review_tokens_created_at DEFAULT SYSUTCDATETIME(),
+
+        CONSTRAINT PK_ocr_review_tokens PRIMARY KEY (id),
+        CONSTRAINT FK_ocr_review_tokens_review FOREIGN KEY (review_id)
+            REFERENCES dbo.ocr_reviews(id) ON DELETE CASCADE,
+        CONSTRAINT FK_ocr_review_tokens_source FOREIGN KEY (source_token_id)
+            REFERENCES dbo.ocr_tokens(id),
+        CONSTRAINT UQ_ocr_review_tokens_order UNIQUE (review_id, token_order),
+        CONSTRAINT CK_ocr_review_tokens_order CHECK (token_order >= 1),
+        CONSTRAINT CK_ocr_review_tokens_bbox CHECK
+            (x1 >= 0 AND y1 >= 0 AND x2 > x1 AND y2 > y1)
+    );
+END;
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.indexes
+    WHERE name = N'UX_ocr_reviews_active_run'
+      AND object_id = OBJECT_ID(N'dbo.ocr_reviews')
+)
+BEGIN
+    CREATE UNIQUE INDEX UX_ocr_reviews_active_run
+        ON dbo.ocr_reviews (ocr_run_id)
+        WHERE is_active = 1;
+END;
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.indexes
+    WHERE name = N'IX_ocr_review_tokens_source'
+      AND object_id = OBJECT_ID(N'dbo.ocr_review_tokens')
+)
+BEGIN
+    CREATE INDEX IX_ocr_review_tokens_source
+        ON dbo.ocr_review_tokens (source_token_id)
+        INCLUDE (review_id, token_order);
+END;
+GO
+
 IF NOT EXISTS
 (
     SELECT 1 FROM sys.indexes

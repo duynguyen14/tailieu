@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from sqlalchemy import select, true
@@ -9,7 +10,14 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from app.core.config import get_settings
 from app.db.database import Database
-from app.db.models import DocumentCase, DocumentCasePage, OcrRun
+from app.db.models import (
+    DocumentCase,
+    DocumentCasePage,
+    OcrReview,
+    OcrReviewToken,
+    OcrRun,
+    OcrToken,
+)
 from app.schemas.case_extraction import CASE_SCHEMA_VERSION
 
 
@@ -78,17 +86,28 @@ def source_token_id(page_number: int, token_id: str) -> str:
     return f"p{page_number}_{token_id}"
 
 
-def page_token_lines(case_page: DocumentCasePage, run: OcrRun) -> str:
+@dataclass(frozen=True)
+class ReviewedExportToken:
+    token_id: str
+    text: str
+    bbox: tuple[int, int, int, int]
+    confidence: float | None
+
+
+def page_token_lines(
+    case_page: DocumentCasePage, tokens: list[ReviewedExportToken]
+) -> str:
     page = case_page.page
     lines = [
         f"[PAGE {page.page_number} | ROLE={case_page.page_role} | LABEL={page.label}]"
     ]
-    lines.extend(
-        f"{source_token_id(page.page_number, token.token_id)} | "
-        f"bbox=[{token.x1},{token.y1},{token.x2},{token.y2}] | "
-        f"conf={float(token.confidence):.4f} | {token.text}"
-        for token in run.tokens
-    )
+    for token in tokens:
+        confidence = f"{token.confidence:.4f}" if token.confidence is not None else "HUMAN"
+        x1, y1, x2, y2 = token.bbox
+        lines.append(
+            f"{source_token_id(page.page_number, token.token_id)} | "
+            f"bbox=[{x1},{y1},{x2},{y2}] | conf={confidence} | {token.text}"
+        )
     return "\n".join(lines)
 
 
@@ -140,6 +159,60 @@ def main() -> None:
                     ).all()
                 )
             run_by_page = {run.page_id: run for run in runs}
+            run_ids = [run.id for run in runs]
+            reviews = (
+                list(
+                    session.scalars(
+                        select(OcrReview).where(
+                            OcrReview.ocr_run_id.in_(run_ids),
+                            OcrReview.is_active == true(),
+                        )
+                    ).all()
+                )
+                if run_ids
+                else []
+            )
+            review_by_run = {review.ocr_run_id: review for review in reviews}
+            review_ids = [review.id for review in reviews]
+            reviewed_tokens = (
+                list(
+                    session.scalars(
+                        select(OcrReviewToken)
+                        .where(OcrReviewToken.review_id.in_(review_ids))
+                        .order_by(
+                            OcrReviewToken.review_id.asc(),
+                            OcrReviewToken.token_order.asc(),
+                        )
+                    ).all()
+                )
+                if review_ids
+                else []
+            )
+            raw_by_id: dict[str, OcrToken] = {
+                token.id: token for run in runs for token in run.tokens
+            }
+            reviewed_tokens_by_review: dict[str, list[OcrReviewToken]] = {}
+            for token in reviewed_tokens:
+                reviewed_tokens_by_review.setdefault(token.review_id, []).append(token)
+            export_tokens_by_run: dict[str, list[ReviewedExportToken]] = {}
+            for review in reviews:
+                tokens: list[ReviewedExportToken] = []
+                for token in reviewed_tokens_by_review.get(review.id, []):
+                    source = raw_by_id.get(token.source_token_id or "")
+                    token_code = (
+                        source.token_id
+                        if source is not None
+                        else f"h_{token.token_order:04d}"
+                    )
+                    tokens.append(
+                        ReviewedExportToken(
+                            token_id=token_code,
+                            text=token.reviewed_text,
+                            bbox=(token.x1, token.y1, token.x2, token.y2),
+                            confidence=(float(source.confidence) if source else None),
+                        )
+                    )
+                export_tokens_by_run[review.ocr_run_id] = tokens
 
             with output.open("w", encoding="utf-8") as handle:
                 for case in cases:
@@ -147,10 +220,11 @@ def main() -> None:
                         case_page.page.page_number
                         for case_page in case.pages
                         if case_page.page_id not in run_by_page
+                        or run_by_page[case_page.page_id].id not in review_by_run
                     ]
                     if missing:
                         message = (
-                            f"Case {case.id} has no completed active OCR for pages {missing}"
+                            f"Case {case.id} has no human-reviewed active OCR for pages {missing}"
                         )
                         if args.fail_on_incomplete:
                             raise RuntimeError(message)
@@ -164,10 +238,12 @@ def main() -> None:
                     for case_page in case.pages:
                         page = case_page.page
                         run = run_by_page[case_page.page_id]
-                        sections.append(page_token_lines(case_page, run))
+                        review = review_by_run[run.id]
+                        export_tokens = export_tokens_by_run[run.id]
+                        sections.append(page_token_lines(case_page, export_tokens))
                         token_ids = [
                             source_token_id(page.page_number, token.token_id)
-                            for token in run.tokens
+                            for token in export_tokens
                         ]
                         allowed_token_ids.extend(token_ids)
                         page_records.append(
@@ -177,6 +253,7 @@ def main() -> None:
                                 "page_role": case_page.page_role,
                                 "page_type": page.label,
                                 "ocr_run_id": run.id,
+                                "ocr_review_id": review.id,
                             }
                         )
 

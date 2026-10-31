@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.annotation_routes import router as annotation_router
+from app.api.ocr_review_routes import router as ocr_review_router
 from app.api.page_label_audit_routes import router as page_label_audit_router
 from app.api.routes import router
 from app.api.table_annotation_routes import router as table_annotation_router
@@ -15,6 +16,7 @@ from app.core.runtime import resolve_runtime
 from app.db.database import Database
 from app.models.factory import build_model_bundle
 from app.services.annotation import AnnotationService
+from app.services.ocr_review import OcrReviewService
 from app.services.pdf_renderer import PdfRenderer
 from app.services.page_label_audit import PageLabelAuditService
 from app.services.pipeline import DocumentPipeline
@@ -47,6 +49,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         storage=annotation_storage,
     )
     page_label_audit_service = PageLabelAuditService(
+        database=database,
+        storage=annotation_storage,
+    )
+    ocr_review_service = OcrReviewService(
         database=database,
         storage=annotation_storage,
     )
@@ -89,9 +95,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.annotation_service = annotation_service
     app.state.table_annotation_service = table_annotation_service
     app.state.page_label_audit_service = page_label_audit_service
+    app.state.ocr_review_service = ocr_review_service
     app.include_router(router, prefix=settings.api_prefix)
     app.include_router(annotation_router, prefix=settings.api_prefix)
     app.include_router(page_label_audit_router, prefix=settings.api_prefix)
+    app.include_router(ocr_review_router, prefix=settings.api_prefix)
     app.include_router(table_annotation_router, prefix=settings.api_prefix)
     return app
 

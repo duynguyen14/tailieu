@@ -4,7 +4,9 @@ import base64
 import json
 import tempfile
 from contextlib import contextmanager
+from decimal import Decimal
 from pathlib import Path
+from uuid import uuid4
 
 import pymupdf
 from fastapi.testclient import TestClient
@@ -14,6 +16,10 @@ from app.core.config import PROJECT_ROOT, Settings
 from app.db.models import (
     AnnotationDocument,
     AnnotationPage,
+    OcrReview,
+    OcrReviewToken,
+    OcrRun,
+    OcrToken,
     PageLabelAudit,
     TableAnnotation,
     utc_now,
@@ -90,6 +96,118 @@ def test_model_status_reports_mock_components_loaded() -> None:
     assert payload["backend"] == "mock"
     assert payload["effective_device"] == "cpu"
     assert all(component["loaded"] for component in payload["components"])
+
+
+def test_grounded_ocr_review_preserves_raw_and_saves_corrected_snapshot() -> None:
+    with _client() as client:
+        imported = client.post(
+            "/api/v1/annotation/documents",
+            files={"file": ("ocr-review.pdf", _two_page_pdf(), "application/pdf")},
+        ).json()
+        page = imported["document"]["pages"][0]
+        run_id = str(uuid4())
+        first_token_id = str(uuid4())
+        second_token_id = str(uuid4())
+        with client.app.state.database.session() as session:
+            session.add(
+                OcrRun(
+                    id=run_id,
+                    page_id=page["id"],
+                    status="COMPLETED",
+                    is_active=True,
+                    model_name="det+rec",
+                    model_version="test-v1",
+                    device="gpu:0",
+                    processing_time_ms=123,
+                )
+            )
+            session.add_all(
+                [
+                    OcrToken(
+                        id=first_token_id,
+                        ocr_run_id=run_id,
+                        token_index=1,
+                        token_id="t_0001",
+                        text="RF02I053O",
+                        confidence=Decimal("0.81"),
+                        x1=10,
+                        y1=20,
+                        x2=120,
+                        y2=40,
+                    ),
+                    OcrToken(
+                        id=second_token_id,
+                        ocr_run_id=run_id,
+                        token_index=2,
+                        token_id="t_0002",
+                        text="false positive",
+                        confidence=Decimal("0.55"),
+                        x1=10,
+                        y1=50,
+                        x2=130,
+                        y2=70,
+                    ),
+                ]
+            )
+
+        queue = client.get("/api/v1/ocr-review/review/next")
+        assert queue.status_code == 200
+        current = queue.json()["current"]
+        assert current["run"]["id"] == run_id
+        assert current["run"]["device"] == "gpu:0"
+        assert current["tokens"][0]["raw_text"] == "RF02I053O"
+        assert current["tokens"][0]["reviewed_text"] == "RF02I053O"
+
+        reviewed = client.put(
+            f"/api/v1/ocr-review/{run_id}/review",
+            json={
+                "reviewed_by": "thai",
+                "review_note": "correct OCR and remove false positive",
+                "tokens": [
+                    {
+                        "source_token_id": first_token_id,
+                        "reviewed_text": "RF0210530",
+                        "reviewed_bbox": [8, 18, 122, 42],
+                    },
+                    {
+                        "source_token_id": None,
+                        "reviewed_text": "Added missing line",
+                        "reviewed_bbox": [10, 80, 150, 100],
+                    },
+                ],
+            },
+        )
+        assert reviewed.status_code == 200
+        result = reviewed.json()
+        assert result["run"]["reviewed_by"] == "thai"
+        assert result["tokens"][0]["raw_text"] == "RF02I053O"
+        assert result["tokens"][0]["reviewed_text"] == "RF0210530"
+        assert result["tokens"][0]["is_changed"] is True
+        assert result["tokens"][1]["is_human_added"] is True
+
+        completed_queue = client.get("/api/v1/ocr-review/review/next").json()
+        assert completed_queue["current"] is None
+        assert completed_queue["stats"]["pending"] == 0
+        assert completed_queue["stats"]["reviewed"] == 1
+
+        with client.app.state.database.session() as session:
+            raw_first = session.get(OcrToken, first_token_id)
+            raw_second = session.get(OcrToken, second_token_id)
+            active_review = session.scalar(
+                select(OcrReview).where(OcrReview.is_active == True)  # noqa: E712
+            )
+            review_tokens = list(
+                session.scalars(
+                    select(OcrReviewToken).order_by(OcrReviewToken.token_order)
+                ).all()
+            )
+            assert raw_first is not None and raw_first.text == "RF02I053O"
+            assert raw_second is not None and raw_second.text == "false positive"
+            assert active_review is not None
+            assert [token.reviewed_text for token in review_tokens] == [
+                "RF0210530",
+                "Added missing line",
+            ]
 
 
 def test_extract_returns_two_typed_pages() -> None:

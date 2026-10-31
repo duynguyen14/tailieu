@@ -308,6 +308,63 @@ class OcrToken(Base):
     run: Mapped[OcrRun] = relationship(back_populates="tokens")
 
 
+class OcrReview(Base):
+    __tablename__ = "ocr_reviews"
+    __table_args__ = (
+        CheckConstraint("status IN ('REVIEWED')", name="ck_ocr_review_status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    ocr_run_id: Mapped[str] = mapped_column(
+        ForeignKey("ocr_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    parent_review_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ocr_reviews.id"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="REVIEWED")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    reviewed_by: Mapped[str] = mapped_column(String(100), nullable=False)
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+
+class OcrReviewToken(Base):
+    __tablename__ = "ocr_review_tokens"
+    __table_args__ = (
+        UniqueConstraint("review_id", "token_order", name="uq_ocr_review_token_order"),
+        CheckConstraint("token_order >= 1", name="ck_ocr_review_token_order"),
+        CheckConstraint(
+            "x1 >= 0 AND y1 >= 0 AND x2 > x1 AND y2 > y1",
+            name="ck_ocr_review_token_bbox",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    review_id: Mapped[str] = mapped_column(
+        ForeignKey("ocr_reviews.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_token_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ocr_tokens.id"), nullable=True, index=True
+    )
+    token_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    reviewed_text: Mapped[str] = mapped_column(Text, nullable=False)
+    x1: Mapped[int] = mapped_column(Integer, nullable=False)
+    y1: Mapped[int] = mapped_column(Integer, nullable=False)
+    x2: Mapped[int] = mapped_column(Integer, nullable=False)
+    y2: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+
 class TableAnnotation(Base):
     __tablename__ = "table_annotations"
     __table_args__ = (
