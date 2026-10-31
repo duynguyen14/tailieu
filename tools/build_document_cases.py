@@ -64,51 +64,40 @@ class AuditedClassifiedPage:
 
 
 def group_document_pages(pages: list[ClassifiedPage]) -> list[CaseDraft]:
-    """Create contiguous cases from reviewed page classifications.
+    """Create exactly one logical case for one source PDF.
 
-    Any unreviewed or unrelated page is a hard boundary. An applicant page
-    without a preceding note is retained as an orphan case for human review.
+    The business invariant is one imported PDF equals one dossier. Therefore
+    target pages do not need to be contiguous and unrelated pages do not split
+    the dossier. Only second-pass reviewed NOTE/TABLE/LIST pages are attached.
+    A dossier missing either the note side or applicant-data side is retained
+    as NEEDS_REVIEW instead of being silently treated as complete.
     """
 
-    cases: list[CaseDraft] = []
-    current: CaseDraft | None = None
-
-    def finish() -> None:
-        nonlocal current
-        if current is not None and current.pages:
-            cases.append(current)
-        current = None
-
+    case_pages: list[CasePageDraft] = []
+    has_note = False
+    has_applicant_data = False
     for page in sorted(pages, key=lambda item: item.page_number):
         if page.review_status != ReviewStatus.REVIEWED.value:
-            finish()
             continue
-
         label = (page.label or "").upper()
         if label == NOTE_LABEL:
-            finish()
-            current = CaseDraft(
-                pages=[CasePageDraft(page.id, page.page_number, "NOTE")]
-            )
-            continue
-
-        if label in APPLICANT_LABELS:
-            if current is None:
-                current = CaseDraft(status="NEEDS_REVIEW")
-            current.pages.append(
+            case_pages.append(CasePageDraft(page.id, page.page_number, "NOTE"))
+            has_note = True
+        elif label in APPLICANT_LABELS:
+            case_pages.append(
                 CasePageDraft(page.id, page.page_number, "APPLICANT_DATA")
             )
-            continue
+            has_applicant_data = True
 
-        finish()
-
-    finish()
-    return cases
+    if not case_pages:
+        return []
+    status = "AUTO_GROUPED" if has_note and has_applicant_data else "NEEDS_REVIEW"
+    return [CaseDraft(pages=case_pages, status=status)]
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Group reviewed page classifications into logical document cases."
+        description="Create one logical dossier case per reviewed source PDF."
     )
     parser.add_argument("--document-id", default=None)
     parser.add_argument("--limit-documents", type=int, default=0)

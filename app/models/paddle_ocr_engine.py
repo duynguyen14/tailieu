@@ -180,6 +180,12 @@ class PaddleOcrEngine:
         )
         if requested in {DevicePreference.AUTO, DevicePreference.CUDA} and gpu_available:
             return f"gpu:{self._settings.ocr_runtime_gpu_device_id}"
-        if requested == DevicePreference.CUDA and not self._settings.ocr_runtime_allow_cpu_fallback:
-            raise OcrModelUnavailableError("CUDA OCR was requested but Paddle GPU is unavailable.")
+        if not self._settings.ocr_runtime_allow_cpu_fallback:
+            if requested == DevicePreference.CPU:
+                raise OcrModelUnavailableError(
+                    "CPU OCR is disabled by OCR_RUNTIME_ALLOW_CPU_FALLBACK=false."
+                )
+            raise OcrModelUnavailableError(
+                "GPU OCR is required but CUDA-enabled Paddle is unavailable."
+            )
         return "cpu"

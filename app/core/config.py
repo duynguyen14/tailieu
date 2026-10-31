@@ -93,12 +93,12 @@ class Settings(BaseSettings):
     table_enable_hpi: bool = False
     table_assume_first_row_header: bool = True
 
-    # GPU-first OCR used to create grounded LLM inputs. PaddleOCR returns text,
+    # GPU-only OCR used to create grounded LLM inputs. PaddleOCR returns text,
     # confidence and source boxes; the LLM must cite token IDs instead of
     # generating coordinates itself.
-    ocr_runtime_device: DevicePreference = DevicePreference.AUTO
+    ocr_runtime_device: DevicePreference = DevicePreference.CUDA
     ocr_runtime_gpu_device_id: int = Field(default=0, ge=0)
-    ocr_runtime_allow_cpu_fallback: bool = True
+    ocr_runtime_allow_cpu_fallback: bool = False
     ocr_detection_model_name: str = "PP-OCRv6_medium_det"
     ocr_recognition_model_name: str = "PP-OCRv6_medium_rec"
     ocr_detection_model_dir: Path | None = None

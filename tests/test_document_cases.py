@@ -18,7 +18,7 @@ def page(number: int, label: str | None, status: str = "REVIEWED") -> SimpleName
     )
 
 
-def test_groups_note_and_following_applicant_pages_into_one_case() -> None:
+def test_one_pdf_is_one_case_even_when_target_pages_are_not_contiguous() -> None:
     cases = group_document_pages(
         [
             page(1, "DIPLOMATIC_NOTE"),
@@ -29,17 +29,18 @@ def test_groups_note_and_following_applicant_pages_into_one_case() -> None:
         ]
     )
 
-    assert len(cases) == 2
-    assert [item.page_number for item in cases[0].pages] == [1, 2, 3]
+    assert len(cases) == 1
+    assert [item.page_number for item in cases[0].pages] == [1, 2, 3, 5]
     assert [item.page_role for item in cases[0].pages] == [
         "NOTE",
         "APPLICANT_DATA",
         "APPLICANT_DATA",
+        "NOTE",
     ]
-    assert [item.page_number for item in cases[1].pages] == [5]
+    assert cases[0].status == "AUTO_GROUPED"
 
 
-def test_unreviewed_page_is_a_hard_case_boundary() -> None:
+def test_unreviewed_target_page_is_ignored_without_splitting_the_pdf() -> None:
     cases = group_document_pages(
         [
             page(1, "DIPLOMATIC_NOTE"),
@@ -48,10 +49,9 @@ def test_unreviewed_page_is_a_hard_case_boundary() -> None:
         ]
     )
 
-    assert len(cases) == 2
-    assert [item.page_number for item in cases[0].pages] == [1]
-    assert [item.page_number for item in cases[1].pages] == [3]
-    assert cases[1].status == "NEEDS_REVIEW"
+    assert len(cases) == 1
+    assert [item.page_number for item in cases[0].pages] == [1, 3]
+    assert cases[0].status == "AUTO_GROUPED"
 
 
 def test_orphan_applicant_pages_are_kept_for_review() -> None:
@@ -62,6 +62,10 @@ def test_orphan_applicant_pages_are_kept_for_review() -> None:
     assert len(cases) == 1
     assert cases[0].status == "NEEDS_REVIEW"
     assert [item.page_number for item in cases[0].pages] == [2, 3]
+
+
+def test_pdf_without_reviewed_target_pages_creates_no_case() -> None:
+    assert group_document_pages([page(1, "OTHER"), page(2, None)]) == []
 
 
 def test_case_evidence_uses_page_prefixed_token_ids() -> None:
