@@ -11,7 +11,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.core.config import PROJECT_ROOT, Settings
-from app.db.models import AnnotationDocument, AnnotationPage, TableAnnotation, utc_now
+from app.db.models import (
+    AnnotationDocument,
+    AnnotationPage,
+    PageLabelAudit,
+    TableAnnotation,
+    utc_now,
+)
 from app.main import create_app
 from app.schemas.table_annotation import (
     TableElementPayload,
@@ -323,6 +329,103 @@ def test_annotation_labels_are_exactly_the_supported_review_classes() -> None:
         "VISA_REQUEST_OFFICIAL_LETTER",
         "OTHER",
     ]
+
+
+def test_second_pass_label_audit_uses_only_first_pass_reviewed_target_pages() -> None:
+    with _client() as client:
+        imported = client.post(
+            "/api/v1/annotation/documents",
+            files={"file": ("audit.pdf", _two_page_pdf(), "application/pdf")},
+        ).json()
+        document_id = imported["document"]["id"]
+        page_1_id = imported["document"]["pages"][0]["id"]
+        page_2_id = imported["document"]["pages"][1]["id"]
+
+        client.put(
+            f"/api/v1/annotation/documents/{document_id}/pages/1/review",
+            json={"label": "DIPLOMATIC_NOTE", "reviewed_by": "first-reviewer"},
+        )
+        with client.app.state.database.session() as session:
+            predicted_only = session.get(AnnotationPage, page_2_id)
+            assert predicted_only is not None
+            predicted_only.label = "APPLICANT_TABLE"
+            predicted_only.model_predicted_label = "APPLICANT_TABLE"
+            predicted_only.model_prediction_confidence = 0.99
+            predicted_only.model_prediction_version = "model-only"
+            predicted_only.model_predicted_at = utc_now()
+
+        queue = client.get("/api/v1/annotation/label-audit/review/next")
+        assert queue.status_code == 200
+        payload = queue.json()
+        assert payload["current"]["document_id"] == document_id
+        assert [item["page"]["id"] for item in payload["current"]["candidate_pages"]] == [
+            page_1_id
+        ]
+        assert payload["stats"] == {
+            "pending_pages": 1,
+            "reviewed_pages": 0,
+            "total_pages": 1,
+            "pending_documents": 1,
+            "total_documents": 1,
+        }
+
+
+def test_second_pass_label_audit_updates_canonical_labels_and_preserves_original() -> None:
+    with _client() as client:
+        imported = client.post(
+            "/api/v1/annotation/documents",
+            files={"file": ("audit-update.pdf", _two_page_pdf(), "application/pdf")},
+        ).json()
+        document_id = imported["document"]["id"]
+        page_1_id = imported["document"]["pages"][0]["id"]
+        page_2_id = imported["document"]["pages"][1]["id"]
+        client.put(
+            f"/api/v1/annotation/documents/{document_id}/pages/1/review",
+            json={"label": "DIPLOMATIC_NOTE", "reviewed_by": "first-reviewer"},
+        )
+        client.put(
+            f"/api/v1/annotation/documents/{document_id}/pages/2/review",
+            json={"label": "APPLICANT_TABLE", "reviewed_by": "first-reviewer"},
+        )
+
+        queued = client.get("/api/v1/annotation/label-audit/review/next").json()
+        assert len(queued["current"]["candidate_pages"]) == 2
+        reviewed = client.put(
+            f"/api/v1/annotation/label-audit/documents/{document_id}/review",
+            json={
+                "reviewed_by": "thai",
+                "pages": [
+                    {"page_id": page_1_id, "label": "DIPLOMATIC_NOTE"},
+                    {
+                        "page_id": page_2_id,
+                        "label": "OTHER",
+                        "audit_note": "First pass was incorrect",
+                    },
+                ],
+            },
+        )
+        assert reviewed.status_code == 200
+        assert reviewed.json()["reviewed_pages"] == 2
+
+        complete = client.get("/api/v1/annotation/label-audit/review/next").json()
+        assert complete["current"] is None
+        assert complete["stats"]["pending_pages"] == 0
+        assert complete["stats"]["reviewed_pages"] == 2
+
+        with client.app.state.database.session() as session:
+            page_2 = session.get(AnnotationPage, page_2_id)
+            audits = list(
+                session.scalars(
+                    select(PageLabelAudit).order_by(PageLabelAudit.original_label.asc())
+                ).all()
+            )
+            assert page_2 is not None
+            assert page_2.label == "OTHER"
+            assert len(audits) == 2
+            corrected = next(item for item in audits if item.page_id == page_2_id)
+            assert corrected.original_label == "APPLICANT_TABLE"
+            assert corrected.audited_label == "OTHER"
+            assert corrected.audited_by == "thai"
 
 
 def test_table_annotation_prediction_and_human_review_flow() -> None:

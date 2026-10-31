@@ -92,6 +92,41 @@ class AnnotationPage(Base):
     document: Mapped[AnnotationDocument] = relationship(back_populates="pages")
 
 
+class PageLabelAudit(Base):
+    __tablename__ = "page_label_audits"
+    __table_args__ = (
+        CheckConstraint(
+            "audit_status IN ('PENDING', 'REVIEWED')",
+            name="ck_page_label_audit_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    page_id: Mapped[str] = mapped_column(
+        ForeignKey("annotation_pages.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    original_label: Mapped[str] = mapped_column(String(64), nullable=False)
+    audited_label: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    audit_status: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="PENDING", index=True
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    source_reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    audited_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    audit_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    audited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    page: Mapped[AnnotationPage] = relationship()
+
+
 class DocumentCase(Base):
     __tablename__ = "document_cases"
     __table_args__ = (

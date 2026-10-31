@@ -85,9 +85,10 @@ LLM_LORA_DROPOUT=0.05
 `auto` selects GPU 0 when the corresponding CUDA runtime is available and
 falls back to CPU only when the fallback flag permits it.
 
-## 3. Initialize case and OCR tables
+## 3. Initialize second-pass audit, case and OCR tables
 
 ```cmd
+python -m tools.init_page_label_audit_db
 python -m tools.init_document_case_db
 python -m tools.init_ocr_grounding_db
 ```
@@ -95,6 +96,7 @@ python -m tools.init_ocr_grounding_db
 Tables:
 
 ```text
+dbo.page_label_audits
 dbo.document_cases
 dbo.document_case_pages
 dbo.case_extraction_annotations
@@ -102,7 +104,16 @@ dbo.ocr_runs
 dbo.ocr_tokens
 ```
 
-## 4. Build cases from reviewed page classifications
+## 4. Verify target page labels a second time
+
+Open the Angular route `/document-label-audit`. The queue is seeded only from
+pages whose first-pass `review_status` is `REVIEWED` and whose human label is
+`DIPLOMATIC_NOTE`, `APPLICANT_TABLE`, or `APPLICANT_LIST`. Model predictions do
+not enter this queue. Each PDF is saved as one transaction; the original label
+is preserved in `page_label_audits` and the audited label becomes the canonical
+`annotation_pages.label`.
+
+## 5. Build cases from audited page classifications
 
 Preview grouping without writing anything:
 
@@ -122,7 +133,10 @@ An unrelated or unreviewed page is a case boundary. A
 without a preceding note are retained with `NEEDS_REVIEW` status. To recompute
 grouping later, use `--rebuild`; old cases are deactivated rather than deleted.
 
-## 5. Download/verify models
+`build_document_cases` ignores the first-pass label unless it has a completed,
+active second-pass audit.
+
+## 6. Download/verify models
 
 This does not process any document:
 
@@ -133,7 +147,7 @@ python -m tools.download_document_ai_models --component all --device auto
 Paddle stores official OCR weights in its model cache. Qwen is stored under
 `models/llm/qwen3-4b`, which is already ignored by Git.
 
-## 6. Run a small OCR batch
+## 7. Run a small OCR batch
 
 ```cmd
 python -m tools.run_grounded_ocr --limit 10 --device auto
@@ -149,7 +163,7 @@ Run all remaining eligible pages after checking the first batch:
 python -m tools.run_grounded_ocr --device auto
 ```
 
-## 7. Produce case-level annotation seeds
+## 8. Produce case-level annotation seeds
 
 ```cmd
 python -m tools.export_llm_annotation_seed
@@ -172,7 +186,7 @@ and do not change the page-local token IDs stored in SQL Server:
 
 Every evidence token is validated against all OCR tokens in that case.
 
-## 8. Build SFT splits
+## 9. Build SFT splits
 
 ```cmd
 python -m tools.build_grounded_sft_dataset

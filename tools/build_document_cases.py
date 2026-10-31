@@ -16,6 +16,7 @@ from app.db.models import (
     CaseExtractionAnnotation,
     DocumentCase,
     DocumentCasePage,
+    PageLabelAudit,
     utc_now,
 )
 from app.schemas.annotation import ReviewStatus
@@ -52,6 +53,14 @@ class CaseDraft:
     @property
     def end_page_number(self) -> int:
         return max(page.page_number for page in self.pages)
+
+
+@dataclass(frozen=True)
+class AuditedClassifiedPage:
+    id: str
+    page_number: int
+    label: str | None
+    review_status: str
 
 
 def group_document_pages(pages: list[ClassifiedPage]) -> list[CaseDraft]:
@@ -126,17 +135,28 @@ def main() -> None:
     database = Database(settings)
     created_cases = 0
     created_pages = 0
+    planned_cases = 0
+    planned_pages = 0
     skipped_documents = 0
     try:
         with database.session() as session:
+            audited_target_exists = (
+                select(PageLabelAudit.id)
+                .join(AnnotationPage, AnnotationPage.id == PageLabelAudit.page_id)
+                .where(
+                    AnnotationPage.document_id == AnnotationDocument.id,
+                    PageLabelAudit.is_active == true(),
+                    PageLabelAudit.audit_status == "REVIEWED",
+                    PageLabelAudit.audited_label.in_(
+                        [NOTE_LABEL, *sorted(APPLICANT_LABELS)]
+                    ),
+                )
+                .exists()
+            )
             statement = (
                 select(AnnotationDocument)
                 .options(selectinload(AnnotationDocument.pages))
-                .where(
-                    AnnotationDocument.pages.any(
-                        AnnotationPage.label.in_([NOTE_LABEL, *sorted(APPLICANT_LABELS)])
-                    )
-                )
+                .where(audited_target_exists)
                 .order_by(AnnotationDocument.created_at.asc())
             )
             if args.document_id:
@@ -146,6 +166,40 @@ def main() -> None:
             documents = list(session.scalars(statement).unique().all())
 
             for document in documents:
+                audit_rows = list(
+                    session.scalars(
+                        select(PageLabelAudit)
+                        .join(AnnotationPage, AnnotationPage.id == PageLabelAudit.page_id)
+                        .where(
+                            AnnotationPage.document_id == document.id,
+                            PageLabelAudit.is_active == true(),
+                        )
+                    ).all()
+                )
+                if any(audit.audit_status != "REVIEWED" for audit in audit_rows):
+                    skipped_documents += 1
+                    print(
+                        f"SKIP document={document.id}: second-pass label audit is incomplete"
+                    )
+                    continue
+                audit_by_page = {audit.page_id: audit for audit in audit_rows}
+                audited_pages = [
+                    AuditedClassifiedPage(
+                        id=page.id,
+                        page_number=page.page_number,
+                        label=(
+                            audit_by_page[page.id].audited_label
+                            if page.id in audit_by_page
+                            else None
+                        ),
+                        review_status=(
+                            ReviewStatus.REVIEWED.value
+                            if page.id in audit_by_page
+                            else ReviewStatus.UNLABELED.value
+                        ),
+                    )
+                    for page in document.pages
+                ]
                 active_ids = list(
                     session.scalars(
                         select(DocumentCase.id).where(
@@ -162,7 +216,9 @@ def main() -> None:
                     )
                     continue
 
-                drafts = group_document_pages(list(document.pages))
+                drafts = group_document_pages(audited_pages)
+                planned_cases += len(drafts)
+                planned_pages += sum(len(draft.pages) for draft in drafts)
                 print(
                     f"document={document.id} file={document.original_filename!r} "
                     f"cases={len(drafts)}"
@@ -215,7 +271,8 @@ def main() -> None:
 
     print(
         "Document case build finished: "
-        f"cases={created_cases}, case_pages={created_pages}, "
+        f"planned_cases={planned_cases}, planned_case_pages={planned_pages}, "
+        f"created_cases={created_cases}, created_case_pages={created_pages}, "
         f"skipped_documents={skipped_documents}, dry_run={args.dry_run}"
     )
 

@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.annotation_routes import router as annotation_router
+from app.api.page_label_audit_routes import router as page_label_audit_router
 from app.api.routes import router
 from app.api.table_annotation_routes import router as table_annotation_router
 from app.core.config import Settings, get_settings
@@ -15,6 +16,7 @@ from app.db.database import Database
 from app.models.factory import build_model_bundle
 from app.services.annotation import AnnotationService
 from app.services.pdf_renderer import PdfRenderer
+from app.services.page_label_audit import PageLabelAuditService
 from app.services.pipeline import DocumentPipeline
 from app.services.storage import AnnotationStorage
 from app.services.table_annotation import TableAnnotationService
@@ -41,6 +43,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         max_file_size_bytes=settings.max_file_size_bytes,
     )
     table_annotation_service = TableAnnotationService(
+        database=database,
+        storage=annotation_storage,
+    )
+    page_label_audit_service = PageLabelAuditService(
         database=database,
         storage=annotation_storage,
     )
@@ -82,8 +88,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.annotation_storage = annotation_storage
     app.state.annotation_service = annotation_service
     app.state.table_annotation_service = table_annotation_service
+    app.state.page_label_audit_service = page_label_audit_service
     app.include_router(router, prefix=settings.api_prefix)
     app.include_router(annotation_router, prefix=settings.api_prefix)
+    app.include_router(page_label_audit_router, prefix=settings.api_prefix)
     app.include_router(table_annotation_router, prefix=settings.api_prefix)
     return app
 
