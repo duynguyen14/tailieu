@@ -118,6 +118,25 @@ class Settings(BaseSettings):
     def normalize_log_level(cls, value: str) -> str:
         return value.upper().strip()
 
+    @field_validator(
+        "page_classifier_model_path",
+        "page_classifier_labels_path",
+        "ocr_det_model_path",
+        "ocr_rec_model_path",
+        "ocr_char_dict_path",
+        "note_extractor_model_path",
+        "note_extractor_labels_path",
+        "table_structure_model_path",
+        "table_layout_model_dir",
+        "table_structure_model_dir",
+        mode="before",
+    )
+    @classmethod
+    def empty_optional_path_is_none(cls, value):
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @field_validator("annotation_storage_dir")
     @classmethod
     def validate_relative_storage_dir(cls, value: Path) -> Path:
