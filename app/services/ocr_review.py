@@ -44,6 +44,10 @@ class OcrReviewValidationError(ValueError):
     pass
 
 
+class OcrReviewPersistenceError(RuntimeError):
+    """Raised when SQL Server does not persist the submitted review verbatim."""
+
+
 class OcrReviewService:
     def __init__(self, *, database: Database, storage: AnnotationStorage) -> None:
         self._database = database
@@ -342,6 +346,43 @@ class OcrReviewService:
                     )
                 )
             session.flush()
+
+            # Do not trust the in-memory ORM values after INSERT.  Expire them
+            # and read the rows back through SQL Server so an encoding/binding
+            # problem cannot be reported to the frontend as a successful save.
+            session.expire_all()
+            stored_tokens = list(
+                session.scalars(
+                    select(OcrReviewToken)
+                    .where(OcrReviewToken.review_id == review.id)
+                    .order_by(OcrReviewToken.token_order.asc())
+                ).all()
+            )
+            expected_tokens = [
+                (
+                    token.source_token_id,
+                    token.reviewed_text.strip(),
+                    tuple(token.reviewed_bbox),
+                    token.include_in_extraction,
+                    token.ignored_reason,
+                )
+                for token in payload.tokens
+            ]
+            actual_tokens = [
+                (
+                    token.source_token_id,
+                    token.reviewed_text,
+                    (token.x1, token.y1, token.x2, token.y2),
+                    token.include_in_extraction,
+                    token.ignored_reason,
+                )
+                for token in stored_tokens
+            ]
+            if actual_tokens != expected_tokens:
+                raise OcrReviewPersistenceError(
+                    "SQL Server returned review data different from the submitted "
+                    "payload. The transaction was rolled back to protect Unicode text."
+                )
             return self._detail(session, run)
 
     def _detail(self, session, run: OcrRun) -> OcrReviewDetail:

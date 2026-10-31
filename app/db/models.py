@@ -12,6 +12,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    Unicode,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -325,7 +326,11 @@ class OcrToken(Base):
     )
     token_index: Mapped[int] = mapped_column(Integer, nullable=False)
     token_id: Mapped[str] = mapped_column(String(20), nullable=False)
-    text: Mapped[str] = mapped_column(Text, nullable=False)
+    # OCR text is multilingual. ``Text`` binds as VARCHAR/TEXT through the
+    # SQL Server pyodbc dialect and can replace Vietnamese characters with
+    # ``?`` before they reach an NVARCHAR column.  Unicode() binds as
+    # NVARCHAR(max), matching the production schema.
+    text: Mapped[str] = mapped_column(Unicode(), nullable=False)
     confidence: Mapped[Decimal] = mapped_column(Numeric(9, 6), nullable=False)
     x1: Mapped[int] = mapped_column(Integer, nullable=False)
     y1: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -393,7 +398,7 @@ class OcrReview(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     include_in_llm: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     reviewed_by: Mapped[str] = mapped_column(String(100), nullable=False)
-    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    review_note: Mapped[str | None] = mapped_column(Unicode(), nullable=True)
     reviewed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
@@ -424,7 +429,9 @@ class OcrReviewToken(Base):
         ForeignKey("ocr_tokens.id"), nullable=True, index=True
     )
     token_order: Mapped[int] = mapped_column(Integer, nullable=False)
-    reviewed_text: Mapped[str] = mapped_column(Text, nullable=False)
+    # Keep this explicitly Unicode even when the physical SQL Server column
+    # already is NVARCHAR.  The ORM type controls pyodbc parameter binding.
+    reviewed_text: Mapped[str] = mapped_column(Unicode(), nullable=False)
     x1: Mapped[int] = mapped_column(Integer, nullable=False)
     y1: Mapped[int] = mapped_column(Integer, nullable=False)
     x2: Mapped[int] = mapped_column(Integer, nullable=False)
