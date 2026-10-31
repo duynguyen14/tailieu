@@ -71,6 +71,11 @@ OCR_LAYOUT_MODEL_DIR=
 OCR_LAYOUT_THRESHOLD=0.50
 OCR_EXCLUSION_REGION_TYPES=seal
 OCR_AUTO_IGNORE_OVERLAP=0.70
+OCR_ENABLE_ORIENTATION=true
+OCR_ORIENTATION_MODEL_NAME=PP-LCNet_x1_0_doc_ori
+OCR_ORIENTATION_MODEL_DIR=
+OCR_ORIENTATION_MIN_CONFIDENCE=0.80
+OCR_PREPROCESS_VERSION=orientation-v1
 OCR_TARGET_PAGE_TYPES=DIPLOMATIC_NOTE,APPLICANT_TABLE,APPLICANT_LIST
 
 LLM_BASE_MODEL_ID=Qwen/Qwen3-4B
@@ -180,11 +185,25 @@ Nếu cả trang OCR không đủ chất lượng, chọn **Bỏ qua trang**. OC
 được đưa vào `annotation_seed.jsonl`. Case chỉ bị bỏ hoàn toàn khi không còn
 trang nào được duyệt để xuất LLM.
 
-Để chạy lại các trang đã OCR trước khi có bước lọc vùng:
+`--force` sẽ chạy lại cả trang đã có quyết định review. Không dùng tùy chọn này
+trong luồng làm sạch dữ liệu thông thường:
 
 ```bat
 python -m tools.run_grounded_ocr --device cuda --force
 ```
+
+Để áp dụng pipeline orientation mới nhưng tuyệt đối không chạy lại trang đã
+approve hoặc đã bỏ qua, dùng:
+
+```bat
+python -m tools.run_grounded_ocr --device cuda --pending-review-only
+```
+
+Chế độ này chạy cả trang chưa từng OCR và trang đã OCR bằng pipeline cũ nhưng
+chưa có quyết định review. Trang đã chạy thành công với đúng
+`OCR_PREPROCESS_VERSION` sẽ không chạy lặp lại, nên có thể tiếp tục lệnh sau khi
+bị ngắt. Ảnh chuẩn hóa được lưu riêng dưới `ocr_preprocessed/`; PNG nguồn không
+bị ghi đè.
 
 ## 8. Produce case-level annotation seeds
 

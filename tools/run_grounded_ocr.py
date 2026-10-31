@@ -16,15 +16,21 @@ from app.db.models import (
     DocumentCase,
     DocumentCasePage,
     OcrLayoutRegion,
+    OcrReview,
     OcrRun,
     OcrToken,
     utc_now,
 )
-from app.models.paddle_ocr_engine import OcrTokenPrediction, PaddleOcrEngine
 from app.models.paddle_layout_detector import (
     LayoutRegionPrediction,
     PaddleLayoutDetector,
     token_exclusion_reason,
+)
+from app.models.paddle_ocr_engine import OcrTokenPrediction, PaddleOcrEngine
+from app.models.paddle_orientation import (
+    OrientationPrediction,
+    PaddleOrientationClassifier,
+    normalized_png,
 )
 from app.schemas.annotation import ReviewStatus
 from app.services.storage import AnnotationStorage
@@ -46,6 +52,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--page-id", default=None)
     parser.add_argument("--case-id", default=None)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--pending-review-only",
+        action="store_true",
+        help=(
+            "OCR pages without a review decision that have not completed the "
+            "current preprocessing version"
+        ),
+    )
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default=None)
     return parser.parse_args()
 
@@ -58,6 +72,8 @@ def eligible_pages(
     case_id: str | None,
     limit: int,
     force: bool,
+    pending_review_only: bool,
+    preprocess_version: str,
 ) -> list[AnnotationPage]:
     with database.session() as session:
         active_case_page = (
@@ -81,7 +97,28 @@ def eligible_pages(
         )
         if page_id:
             statement = statement.where(AnnotationPage.id == page_id)
-        if not force:
+        if pending_review_only:
+            historical_review_exists = (
+                select(OcrReview.id)
+                .join(OcrRun, OcrRun.id == OcrReview.ocr_run_id)
+                .where(OcrRun.page_id == AnnotationPage.id)
+                .exists()
+            )
+            current_preprocess_exists = (
+                select(OcrRun.id)
+                .where(
+                    OcrRun.page_id == AnnotationPage.id,
+                    OcrRun.status == "COMPLETED",
+                    OcrRun.is_active == true(),
+                    OcrRun.preprocess_version == preprocess_version,
+                )
+                .exists()
+            )
+            statement = statement.where(
+                ~historical_review_exists,
+                ~current_preprocess_exists,
+            )
+        elif not force:
             active_ocr_exists = (
                 select(OcrRun.id)
                 .where(
@@ -132,6 +169,11 @@ def complete_run(
     tokens: list[OcrTokenPrediction],
     regions: list[LayoutRegionPrediction],
     auto_ignore_overlap: float,
+    orientation: OrientationPrediction,
+    processed_image_relative_path: str | None,
+    processed_width: int,
+    processed_height: int,
+    preprocess_version: str,
     processing_time_ms: int,
 ) -> None:
     with database.session() as session:
@@ -174,6 +216,12 @@ def complete_run(
                 )
             )
         run.status = "COMPLETED"
+        run.orientation_angle = orientation.angle
+        run.orientation_confidence = Decimal(str(orientation.confidence))
+        run.processed_image_relative_path = processed_image_relative_path
+        run.processed_width = processed_width
+        run.processed_height = processed_height
+        run.preprocess_version = preprocess_version
         run.processing_time_ms = processing_time_ms
         run.error_message = None
         run.updated_at = utc_now()
@@ -196,6 +244,8 @@ def fail_run(
 def run(args: argparse.Namespace) -> OcrSummary:
     if args.limit < 0:
         raise ValueError("--limit must be zero or greater")
+    if args.force and args.pending_review_only:
+        raise ValueError("--force cannot be combined with --pending-review-only")
     settings = get_settings()
     database = Database(settings)
     storage = AnnotationStorage(settings.annotation_storage_path)
@@ -208,6 +258,8 @@ def run(args: argparse.Namespace) -> OcrSummary:
             case_id=args.case_id,
             limit=args.limit,
             force=args.force,
+            pending_review_only=args.pending_review_only,
+            preprocess_version=settings.ocr_preprocess_version,
         )
         summary.discovered = len(pages)
         if not pages:
@@ -216,14 +268,24 @@ def run(args: argparse.Namespace) -> OcrSummary:
 
         device = DevicePreference(args.device) if args.device else None
         engine = PaddleOcrEngine(settings, device_override=device)
+        orientation_classifier = (
+            PaddleOrientationClassifier(settings, device=engine.effective_device)
+            if settings.ocr_enable_orientation
+            else None
+        )
         layout_detector = (
             PaddleLayoutDetector(settings, device=engine.effective_device)
             if settings.ocr_enable_exclusion_detection
             else None
         )
+        orientation_model_name = (
+            orientation_classifier.model_name if orientation_classifier else "disabled"
+        )
+        layout_model_name = layout_detector.model_name if layout_detector else "disabled"
         print(
             f"Loaded {engine.model_name} on {engine.effective_device}; pages={len(pages)}; "
-            f"exclusion_layout={layout_detector.model_name if layout_detector else 'disabled'}"
+            f"orientation={orientation_model_name}; "
+            f"exclusion_layout={layout_model_name}"
         )
         for position, page in enumerate(pages, start=1):
             started = time.perf_counter()
@@ -231,17 +293,36 @@ def run(args: argparse.Namespace) -> OcrSummary:
                 database,
                 page_id=page.id,
                 model_name=(
-                    f"{engine.model_name}|layout={layout_detector.model_name}"
-                    if layout_detector
-                    else engine.model_name
+                    f"{engine.model_name}"
+                    f"|orientation={orientation_model_name}"
+                    f"|layout={layout_model_name}"
                 ),
                 model_version=settings.ocr_model_version,
                 device=engine.effective_device,
             )
+            processed_relative_path: str | None = None
             try:
-                image_path = storage.resolve(page.image_relative_path)
-                regions = layout_detector.predict(image_path) if layout_detector else []
-                tokens = engine.predict(image_path)
+                source_image_path = storage.resolve(page.image_relative_path)
+                orientation = (
+                    orientation_classifier.predict(source_image_path)
+                    if orientation_classifier
+                    else OrientationPrediction(angle=0, confidence=0.0)
+                )
+                effective_image_path = source_image_path
+                processed_width, processed_height = page.width, page.height
+                if orientation.angle:
+                    content, processed_width, processed_height = normalized_png(
+                        source_image_path, orientation
+                    )
+                    processed_relative_path = (
+                        f"ocr_preprocessed/{page.document_id}/{page.id}/{run_id}.png"
+                    )
+                    storage.write_bytes(processed_relative_path, content)
+                    effective_image_path = storage.resolve(processed_relative_path)
+                regions = (
+                    layout_detector.predict(effective_image_path) if layout_detector else []
+                )
+                tokens = engine.predict(effective_image_path)
                 elapsed_ms = round((time.perf_counter() - started) * 1000)
                 complete_run(
                     database,
@@ -249,6 +330,11 @@ def run(args: argparse.Namespace) -> OcrSummary:
                     tokens=tokens,
                     regions=regions,
                     auto_ignore_overlap=settings.ocr_auto_ignore_overlap,
+                    orientation=orientation,
+                    processed_image_relative_path=processed_relative_path,
+                    processed_width=processed_width,
+                    processed_height=processed_height,
+                    preprocess_version=settings.ocr_preprocess_version,
                     processing_time_ms=elapsed_ms,
                 )
                 summary.completed += 1
@@ -256,9 +342,12 @@ def run(args: argparse.Namespace) -> OcrSummary:
                 print(
                     f"[{position}/{len(pages)}] page={page.id} "
                     f"tokens={len(tokens)} exclusion_regions={len(regions)} "
+                    f"orientation={orientation.angle} "
                     f"time={elapsed_ms}ms"
                 )
             except Exception as exc:
+                if processed_relative_path:
+                    storage.remove_file(processed_relative_path)
                 elapsed_ms = round((time.perf_counter() - started) * 1000)
                 fail_run(database, run_id=run_id, error=exc, processing_time_ms=elapsed_ms)
                 summary.failed += 1

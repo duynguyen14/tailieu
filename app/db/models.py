@@ -243,6 +243,23 @@ class OcrRun(Base):
             "processing_time_ms IS NULL OR processing_time_ms >= 0",
             name="ck_ocr_run_processing_time",
         ),
+        CheckConstraint(
+            "orientation_angle IN (0, 90, 180, 270)",
+            name="ck_ocr_run_orientation_angle",
+        ),
+        CheckConstraint(
+            "orientation_confidence IS NULL OR "
+            "(orientation_confidence >= 0 AND orientation_confidence <= 1)",
+            name="ck_ocr_run_orientation_confidence",
+        ),
+        CheckConstraint(
+            "processed_width IS NULL OR processed_width > 0",
+            name="ck_ocr_run_processed_width",
+        ),
+        CheckConstraint(
+            "processed_height IS NULL OR processed_height > 0",
+            name="ck_ocr_run_processed_height",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -256,6 +273,16 @@ class OcrRun(Base):
     device: Mapped[str] = mapped_column(String(32), nullable=False)
     processing_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    orientation_angle: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    orientation_confidence: Mapped[Decimal | None] = mapped_column(
+        Numeric(9, 6), nullable=True
+    )
+    processed_image_relative_path: Mapped[str | None] = mapped_column(
+        String(1000), nullable=True
+    )
+    processed_width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    processed_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    preprocess_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )

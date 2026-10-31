@@ -96,6 +96,8 @@ class OcrReviewService:
             page = session.get(AnnotationPage, run.page_id)
             if page is None:
                 raise OcrReviewNotFoundError("OCR page was not found.")
+            review_width = run.processed_width or page.width
+            review_height = run.processed_height or page.height
 
             source_tokens = {
                 token.id: token
@@ -142,17 +144,17 @@ class OcrReviewService:
                 if not text:
                     raise OcrReviewValidationError("Reviewed token text cannot be blank.")
                 x1, y1, x2, y2 = token.reviewed_bbox
-                if x2 > page.width or y2 > page.height:
+                if x2 > review_width or y2 > review_height:
                     raise OcrReviewValidationError(
                         f"Token bbox {token.reviewed_bbox} exceeds page dimensions "
-                        f"{page.width}x{page.height}."
+                        f"{review_width}x{review_height}."
                     )
             for region in payload.exclusion_regions:
                 x1, y1, x2, y2 = region.reviewed_bbox
-                if x2 > page.width or y2 > page.height:
+                if x2 > review_width or y2 > review_height:
                     raise OcrReviewValidationError(
                         f"Region bbox {region.reviewed_bbox} exceeds page dimensions "
-                        f"{page.width}x{page.height}."
+                        f"{review_width}x{review_height}."
                     )
 
             previous = session.scalar(
@@ -282,6 +284,13 @@ class OcrReviewService:
                 model_version=run.model_version,
                 device=run.device,
                 processing_time_ms=run.processing_time_ms,
+                orientation_angle=run.orientation_angle,
+                orientation_confidence=(
+                    float(run.orientation_confidence)
+                    if run.orientation_confidence is not None
+                    else None
+                ),
+                preprocess_version=run.preprocess_version,
                 review_id=review.id if review else None,
                 include_in_llm=review.include_in_llm if review else None,
                 reviewed_by=review.reviewed_by if review else None,
@@ -294,13 +303,20 @@ class OcrReviewService:
                 original_filename=document.original_filename,
                 document_page_count=document.page_count,
                 page_number=page.page_number,
-                width=page.width,
-                height=page.height,
-                mime_type=page.mime_type,
+                width=run.processed_width or page.width,
+                height=run.processed_height or page.height,
+                source_width=page.width,
+                source_height=page.height,
+                is_preprocessed=run.processed_image_relative_path is not None,
+                mime_type=(
+                    "image/png" if run.processed_image_relative_path else page.mime_type
+                ),
                 page_type=page.label,
             ),
             image_base64=base64.b64encode(
-                self._storage.read_bytes(page.image_relative_path)
+                self._storage.read_bytes(
+                    run.processed_image_relative_path or page.image_relative_path
+                )
             ).decode("ascii"),
             tokens=tokens,
             exclusion_regions=exclusion_regions,

@@ -61,6 +61,9 @@ class OcrReviewRunInfo(BaseModel):
     model_version: str
     device: str
     processing_time_ms: int | None
+    orientation_angle: int
+    orientation_confidence: float | None
+    preprocess_version: str | None
     review_id: str | None
     include_in_llm: bool | None
     reviewed_by: str | None
@@ -76,6 +79,9 @@ class OcrReviewPageInfo(BaseModel):
     page_number: int = Field(gt=0)
     width: int = Field(gt=0)
     height: int = Field(gt=0)
+    source_width: int = Field(gt=0)
+    source_height: int = Field(gt=0)
+    is_preprocessed: bool
     mime_type: str
     page_type: AnnotationLabel | None
 

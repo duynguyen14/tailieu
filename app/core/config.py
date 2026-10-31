@@ -114,6 +114,11 @@ class Settings(BaseSettings):
     ocr_layout_threshold: float = Field(default=0.50, ge=0.0, le=1.0)
     ocr_exclusion_region_types: str = "seal"
     ocr_auto_ignore_overlap: float = Field(default=0.70, ge=0.0, le=1.0)
+    ocr_enable_orientation: bool = True
+    ocr_orientation_model_name: str = "PP-LCNet_x1_0_doc_ori"
+    ocr_orientation_model_dir: Path | None = None
+    ocr_orientation_min_confidence: float = Field(default=0.80, ge=0.0, le=1.0)
+    ocr_preprocess_version: str = "orientation-v1"
     paddle_pdx_model_source: str = "BOS"
     paddle_pdx_disable_model_source_check: bool = True
 
@@ -172,6 +177,7 @@ class Settings(BaseSettings):
         "ocr_detection_model_dir",
         "ocr_recognition_model_dir",
         "ocr_layout_model_dir",
+        "ocr_orientation_model_dir",
         mode="before",
     )
     @classmethod

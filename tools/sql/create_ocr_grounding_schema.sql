@@ -27,6 +27,13 @@ BEGIN
         device             NVARCHAR(32)  NOT NULL,
         processing_time_ms INT           NULL,
         error_message      NVARCHAR(MAX) NULL,
+        orientation_angle  INT           NOT NULL
+            CONSTRAINT DF_ocr_runs_orientation_angle DEFAULT (0),
+        orientation_confidence DECIMAL(9,6) NULL,
+        processed_image_relative_path NVARCHAR(1000) NULL,
+        processed_width    INT           NULL,
+        processed_height   INT           NULL,
+        preprocess_version NVARCHAR(100) NULL,
         created_at         DATETIMEOFFSET(7) NOT NULL
             CONSTRAINT DF_ocr_runs_created_at DEFAULT SYSUTCDATETIME(),
         updated_at         DATETIMEOFFSET(7) NOT NULL
@@ -38,9 +45,86 @@ BEGIN
         CONSTRAINT CK_ocr_runs_status CHECK
             (status IN (N'PROCESSING', N'COMPLETED', N'FAILED')),
         CONSTRAINT CK_ocr_runs_processing_time CHECK
-            (processing_time_ms IS NULL OR processing_time_ms >= 0)
+            (processing_time_ms IS NULL OR processing_time_ms >= 0),
+        CONSTRAINT CK_ocr_runs_orientation_angle CHECK
+            (orientation_angle IN (0, 90, 180, 270)),
+        CONSTRAINT CK_ocr_runs_orientation_confidence CHECK
+            (orientation_confidence IS NULL OR
+             (orientation_confidence >= 0 AND orientation_confidence <= 1)),
+        CONSTRAINT CK_ocr_runs_processed_width CHECK
+            (processed_width IS NULL OR processed_width > 0),
+        CONSTRAINT CK_ocr_runs_processed_height CHECK
+            (processed_height IS NULL OR processed_height > 0)
     );
 END;
+GO
+
+IF COL_LENGTH(N'dbo.ocr_runs', N'orientation_angle') IS NULL
+BEGIN
+    ALTER TABLE dbo.ocr_runs ADD orientation_angle INT NOT NULL
+        CONSTRAINT DF_ocr_runs_orientation_angle DEFAULT (0) WITH VALUES;
+END;
+GO
+
+IF COL_LENGTH(N'dbo.ocr_runs', N'orientation_confidence') IS NULL
+    ALTER TABLE dbo.ocr_runs ADD orientation_confidence DECIMAL(9,6) NULL;
+GO
+
+IF COL_LENGTH(N'dbo.ocr_runs', N'processed_image_relative_path') IS NULL
+    ALTER TABLE dbo.ocr_runs ADD processed_image_relative_path NVARCHAR(1000) NULL;
+GO
+
+IF COL_LENGTH(N'dbo.ocr_runs', N'processed_width') IS NULL
+    ALTER TABLE dbo.ocr_runs ADD processed_width INT NULL;
+GO
+
+IF COL_LENGTH(N'dbo.ocr_runs', N'processed_height') IS NULL
+    ALTER TABLE dbo.ocr_runs ADD processed_height INT NULL;
+GO
+
+IF COL_LENGTH(N'dbo.ocr_runs', N'preprocess_version') IS NULL
+    ALTER TABLE dbo.ocr_runs ADD preprocess_version NVARCHAR(100) NULL;
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.check_constraints
+    WHERE name = N'CK_ocr_runs_orientation_angle'
+      AND parent_object_id = OBJECT_ID(N'dbo.ocr_runs')
+)
+    ALTER TABLE dbo.ocr_runs WITH CHECK ADD CONSTRAINT CK_ocr_runs_orientation_angle
+        CHECK (orientation_angle IN (0, 90, 180, 270));
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.check_constraints
+    WHERE name = N'CK_ocr_runs_orientation_confidence'
+      AND parent_object_id = OBJECT_ID(N'dbo.ocr_runs')
+)
+    ALTER TABLE dbo.ocr_runs WITH CHECK ADD CONSTRAINT CK_ocr_runs_orientation_confidence
+        CHECK (orientation_confidence IS NULL OR
+               (orientation_confidence >= 0 AND orientation_confidence <= 1));
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.check_constraints
+    WHERE name = N'CK_ocr_runs_processed_width'
+      AND parent_object_id = OBJECT_ID(N'dbo.ocr_runs')
+)
+    ALTER TABLE dbo.ocr_runs WITH CHECK ADD CONSTRAINT CK_ocr_runs_processed_width
+        CHECK (processed_width IS NULL OR processed_width > 0);
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.check_constraints
+    WHERE name = N'CK_ocr_runs_processed_height'
+      AND parent_object_id = OBJECT_ID(N'dbo.ocr_runs')
+)
+    ALTER TABLE dbo.ocr_runs WITH CHECK ADD CONSTRAINT CK_ocr_runs_processed_height
+        CHECK (processed_height IS NULL OR processed_height > 0);
 GO
 
 IF OBJECT_ID(N'dbo.ocr_tokens', N'U') IS NULL

@@ -16,6 +16,8 @@ from app.core.config import PROJECT_ROOT, Settings
 from app.db.models import (
     AnnotationDocument,
     AnnotationPage,
+    DocumentCase,
+    DocumentCasePage,
     OcrLayoutRegion,
     OcrReview,
     OcrReviewRegion,
@@ -32,6 +34,7 @@ from app.schemas.table_annotation import (
     TableElementType,
     TableRegionPayload,
 )
+from tools.run_grounded_ocr import eligible_pages
 
 
 def _two_page_pdf() -> bytes:
@@ -294,6 +297,148 @@ def test_grounded_ocr_review_can_skip_page_without_deleting_ocr_run() -> None:
             )
             assert run is not None and run.is_active is True
             assert review is not None and review.include_in_llm is False
+
+
+def test_pending_review_ocr_excludes_reviewed_and_skipped_pages() -> None:
+    source = pymupdf.open()
+    for text in ("Reviewed note", "Skipped table", "Pending list"):
+        source.new_page(width=300, height=400).insert_text((40, 60), text)
+    pdf_bytes = source.tobytes()
+    source.close()
+
+    with _client() as client:
+        imported = client.post(
+            "/api/v1/annotation/documents",
+            files={"file": ("pending-ocr.pdf", pdf_bytes, "application/pdf")},
+        ).json()
+        document = imported["document"]
+        reviewed_page = document["pages"][0]
+        skipped_page = document["pages"][1]
+        pending_page = document["pages"][2]
+        reviewed_run_id = str(uuid4())
+        skipped_run_id = str(uuid4())
+        pending_run_id = str(uuid4())
+        case_id = str(uuid4())
+
+        with client.app.state.database.session() as session:
+            for page, label in (
+                (reviewed_page, "DIPLOMATIC_NOTE"),
+                (skipped_page, "APPLICANT_TABLE"),
+                (pending_page, "APPLICANT_LIST"),
+            ):
+                stored_page = session.get(AnnotationPage, page["id"])
+                assert stored_page is not None
+                stored_page.label = label
+                stored_page.review_status = "REVIEWED"
+
+            case = DocumentCase(
+                id=case_id,
+                document_id=document["id"],
+                case_index=1,
+                status="REVIEWED",
+                is_active=True,
+                start_page_number=1,
+                end_page_number=3,
+            )
+            case.pages.extend(
+                [
+                    DocumentCasePage(
+                        id=str(uuid4()),
+                        page_id=reviewed_page["id"],
+                        page_order=1,
+                        page_role="NOTE",
+                    ),
+                    DocumentCasePage(
+                        id=str(uuid4()),
+                        page_id=skipped_page["id"],
+                        page_order=2,
+                        page_role="APPLICANT_DATA",
+                    ),
+                    DocumentCasePage(
+                        id=str(uuid4()),
+                        page_id=pending_page["id"],
+                        page_order=3,
+                        page_role="APPLICANT_DATA",
+                    ),
+                ]
+            )
+            session.add(case)
+            session.add_all(
+                [
+                    OcrRun(
+                        id=reviewed_run_id,
+                        page_id=reviewed_page["id"],
+                        status="COMPLETED",
+                        is_active=True,
+                        model_name="det+rec",
+                        model_version="old-v1",
+                        device="gpu:0",
+                    ),
+                    OcrRun(
+                        id=skipped_run_id,
+                        page_id=skipped_page["id"],
+                        status="COMPLETED",
+                        is_active=True,
+                        model_name="det+rec",
+                        model_version="old-v1",
+                        device="gpu:0",
+                    ),
+                    OcrRun(
+                        id=pending_run_id,
+                        page_id=pending_page["id"],
+                        status="COMPLETED",
+                        is_active=True,
+                        model_name="det+rec",
+                        model_version="old-v1",
+                        device="gpu:0",
+                    ),
+                    OcrReview(
+                        id=str(uuid4()),
+                        ocr_run_id=reviewed_run_id,
+                        is_active=True,
+                        include_in_llm=True,
+                        reviewed_by="thai",
+                    ),
+                    OcrReview(
+                        id=str(uuid4()),
+                        ocr_run_id=skipped_run_id,
+                        is_active=True,
+                        include_in_llm=False,
+                        reviewed_by="thai",
+                    ),
+                ]
+            )
+
+        pages = eligible_pages(
+            client.app.state.database,
+            page_types=["DIPLOMATIC_NOTE", "APPLICANT_TABLE", "APPLICANT_LIST"],
+            page_id=None,
+            case_id=None,
+            limit=0,
+            force=False,
+            pending_review_only=True,
+            preprocess_version="orientation-v1",
+        )
+
+        assert [page.id for page in pages] == [pending_page["id"]]
+
+        with client.app.state.database.session() as session:
+            pending_run = session.get(OcrRun, pending_run_id)
+            assert pending_run is not None
+            pending_run.preprocess_version = "orientation-v1"
+
+        already_processed = eligible_pages(
+            client.app.state.database,
+            page_types=["DIPLOMATIC_NOTE", "APPLICANT_TABLE", "APPLICANT_LIST"],
+            page_id=None,
+            case_id=None,
+            limit=0,
+            force=False,
+            pending_review_only=True,
+            preprocess_version="orientation-v1",
+        )
+
+        assert already_processed == []
 
 
 def test_extract_returns_two_typed_pages() -> None:
