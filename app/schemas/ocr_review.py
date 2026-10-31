@@ -48,6 +48,7 @@ class OcrReviewRegionPayload(BaseModel):
 class OcrReviewRequest(BaseModel):
     reviewed_by: str = Field(min_length=1, max_length=100)
     review_note: str | None = Field(default=None, max_length=2000)
+    include_in_llm: bool = True
     tokens: list[OcrReviewTokenPayload] = Field(default_factory=list)
     exclusion_regions: list[OcrReviewRegionPayload] = Field(default_factory=list)
 
@@ -61,6 +62,7 @@ class OcrReviewRunInfo(BaseModel):
     device: str
     processing_time_ms: int | None
     review_id: str | None
+    include_in_llm: bool | None
     reviewed_by: str | None
     review_note: str | None
     reviewed_at: datetime | None
@@ -115,6 +117,7 @@ class OcrReviewDetail(BaseModel):
 class OcrReviewStats(BaseModel):
     pending: int = Field(ge=0)
     reviewed: int = Field(ge=0)
+    skipped: int = Field(ge=0)
     failed: int = Field(ge=0)
     total: int = Field(ge=0)
 

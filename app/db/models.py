@@ -364,6 +364,7 @@ class OcrReview(Base):
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="REVIEWED")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    include_in_llm: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     reviewed_by: Mapped[str] = mapped_column(String(100), nullable=False)
     review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     reviewed_at: Mapped[datetime] = mapped_column(

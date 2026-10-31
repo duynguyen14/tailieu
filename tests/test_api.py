@@ -250,6 +250,52 @@ def test_grounded_ocr_review_preserves_raw_and_saves_corrected_snapshot() -> Non
             assert review_regions[0].region_type == "SEAL"
 
 
+def test_grounded_ocr_review_can_skip_page_without_deleting_ocr_run() -> None:
+    with _client() as client:
+        imported = client.post(
+            "/api/v1/annotation/documents",
+            files={"file": ("skip-ocr.pdf", _two_page_pdf(), "application/pdf")},
+        ).json()
+        page = imported["document"]["pages"][0]
+        run_id = str(uuid4())
+        with client.app.state.database.session() as session:
+            session.add(
+                OcrRun(
+                    id=run_id,
+                    page_id=page["id"],
+                    status="COMPLETED",
+                    is_active=True,
+                    model_name="det+rec",
+                    model_version="test-v1",
+                    device="gpu:0",
+                )
+            )
+
+        response = client.put(
+            f"/api/v1/ocr-review/{run_id}/review",
+            json={
+                "reviewed_by": "thai",
+                "review_note": "Vietnamese OCR quality is not acceptable",
+                "include_in_llm": False,
+                "tokens": [],
+                "exclusion_regions": [],
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["run"]["include_in_llm"] is False
+        queue = client.get("/api/v1/ocr-review/review/next").json()
+        assert queue["current"] is None
+        assert queue["stats"]["skipped"] == 1
+        with client.app.state.database.session() as session:
+            run = session.get(OcrRun, run_id)
+            review = session.scalar(
+                select(OcrReview).where(OcrReview.ocr_run_id == run_id)
+            )
+            assert run is not None and run.is_active is True
+            assert review is not None and review.include_in_llm is False
+
+
 def test_extract_returns_two_typed_pages() -> None:
     with _client() as client:
         response = client.post(

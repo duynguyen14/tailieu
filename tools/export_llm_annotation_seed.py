@@ -237,10 +237,14 @@ def main() -> None:
                     sections: list[str] = []
                     allowed_token_ids: list[str] = []
                     page_records: list[dict] = []
+                    skipped_page_numbers: list[int] = []
                     for case_page in case.pages:
                         page = case_page.page
                         run = run_by_page[case_page.page_id]
                         review = review_by_run[run.id]
+                        if not review.include_in_llm:
+                            skipped_page_numbers.append(page.page_number)
+                            continue
                         export_tokens = export_tokens_by_run[run.id]
                         sections.append(page_token_lines(case_page, export_tokens))
                         token_ids = [
@@ -258,6 +262,13 @@ def main() -> None:
                                 "ocr_review_id": review.id,
                             }
                         )
+
+                    if not sections:
+                        print(
+                            f"SKIP: Case {case.id} has no pages approved for LLM export"
+                        )
+                        skipped += 1
+                        continue
 
                     schema = dict(CASE_SCHEMA)
                     schema["case_id"] = case.id
@@ -278,6 +289,7 @@ def main() -> None:
                         "schema_version": settings.llm_schema_version,
                         "original_filename": case.document.original_filename,
                         "pages": page_records,
+                        "skipped_page_numbers": skipped_page_numbers,
                         "messages": [
                             {"role": "system", "content": SYSTEM_PROMPT},
                             {"role": "user", "content": prompt},

@@ -131,6 +131,8 @@ BEGIN
             CONSTRAINT DF_ocr_reviews_status DEFAULT N'REVIEWED',
         is_active        BIT            NOT NULL
             CONSTRAINT DF_ocr_reviews_is_active DEFAULT (1),
+        include_in_llm   BIT            NOT NULL
+            CONSTRAINT DF_ocr_reviews_include_in_llm DEFAULT (1),
         reviewed_by      NVARCHAR(100)  NOT NULL,
         review_note      NVARCHAR(MAX)  NULL,
         reviewed_at      DATETIMEOFFSET(7) NOT NULL
@@ -147,6 +149,13 @@ BEGIN
             REFERENCES dbo.ocr_reviews(id),
         CONSTRAINT CK_ocr_reviews_status CHECK (status IN (N'REVIEWED'))
     );
+END;
+GO
+
+IF COL_LENGTH(N'dbo.ocr_reviews', N'include_in_llm') IS NULL
+BEGIN
+    ALTER TABLE dbo.ocr_reviews ADD include_in_llm BIT NOT NULL
+        CONSTRAINT DF_ocr_reviews_include_in_llm DEFAULT (1) WITH VALUES;
 END;
 GO
 

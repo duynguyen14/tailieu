@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 from uuid import uuid4
 
-from sqlalchemy import func, select, true
+from sqlalchemy import false, func, select, true
 
 from app.db.database import Database
 from app.db.models import (
@@ -172,6 +172,7 @@ class OcrReviewService:
                 parent_review_id=previous.id if previous else None,
                 status="REVIEWED",
                 is_active=True,
+                include_in_llm=payload.include_in_llm,
                 reviewed_by=reviewer,
                 review_note=payload.review_note.strip() if payload.review_note else None,
                 reviewed_at=now,
@@ -282,6 +283,7 @@ class OcrReviewService:
                 device=run.device,
                 processing_time_ms=run.processing_time_ms,
                 review_id=review.id if review else None,
+                include_in_llm=review.include_in_llm if review else None,
                 reviewed_by=review.reviewed_by if review else None,
                 review_note=review.review_note if review else None,
                 reviewed_at=review.reviewed_at if review else None,
@@ -409,6 +411,16 @@ class OcrReviewService:
             .join(OcrRun, OcrRun.id == OcrReview.ocr_run_id)
             .where(
                 OcrReview.is_active == true(),
+                OcrReview.include_in_llm == true(),
+                OcrRun.is_active == true(),
+            )
+        ) or 0
+        skipped = session.scalar(
+            select(func.count(OcrReview.id))
+            .join(OcrRun, OcrRun.id == OcrReview.ocr_run_id)
+            .where(
+                OcrReview.is_active == true(),
+                OcrReview.include_in_llm == false(),
                 OcrRun.is_active == true(),
             )
         ) or 0
@@ -420,6 +432,7 @@ class OcrReviewService:
         return OcrReviewStats(
             pending=pending,
             reviewed=reviewed,
+            skipped=skipped,
             failed=failed,
-            total=pending + reviewed + failed,
+            total=pending + reviewed + skipped + failed,
         )

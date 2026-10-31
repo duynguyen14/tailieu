@@ -175,6 +175,11 @@ OCR vẫn lưu toàn bộ token gốc. `PP-DocLayout-L` phát hiện vùng `SEAL
 Review cho phép khôi phục token hoặc khoanh thêm vùng `SEAL`, `SIGNATURE`,
 `LOGO`.
 
+Nếu cả trang OCR không đủ chất lượng, chọn **Bỏ qua trang**. OCR và lịch sử vẫn
+được giữ trong DB, nhưng trang có `ocr_reviews.include_in_llm=false` sẽ không
+được đưa vào `annotation_seed.jsonl`. Case chỉ bị bỏ hoàn toàn khi không còn
+trang nào được duyệt để xuất LLM.
+
 Để chạy lại các trang đã OCR trước khi có bước lọc vùng:
 
 ```bat
