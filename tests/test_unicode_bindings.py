@@ -1,6 +1,11 @@
 from sqlalchemy import Unicode
 
-from app.db.models import OcrReview, OcrReviewToken, OcrToken
+from app.db.models import (
+    CaseTextReconstruction,
+    OcrReview,
+    OcrReviewToken,
+    OcrToken,
+)
 
 
 def test_multilingual_ocr_columns_use_unicode_bind_parameters() -> None:
@@ -9,3 +14,8 @@ def test_multilingual_ocr_columns_use_unicode_bind_parameters() -> None:
     assert isinstance(OcrToken.__table__.c.text.type, Unicode)
     assert isinstance(OcrReviewToken.__table__.c.reviewed_text.type, Unicode)
     assert isinstance(OcrReview.__table__.c.review_note.type, Unicode)
+    assert isinstance(
+        CaseTextReconstruction.__table__.c.reconstructed_text.type, Unicode
+    )
+    assert isinstance(CaseTextReconstruction.__table__.c.structure_json.type, Unicode)
+    assert isinstance(CaseTextReconstruction.__table__.c.review_note.type, Unicode)

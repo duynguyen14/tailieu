@@ -170,6 +170,11 @@ class DocumentCase(Base):
         cascade="all, delete-orphan",
         order_by="CaseExtractionAnnotation.created_at",
     )
+    text_reconstructions: Mapped[list[CaseTextReconstruction]] = relationship(
+        back_populates="case",
+        cascade="all, delete-orphan",
+        order_by="CaseTextReconstruction.created_at",
+    )
 
 
 class DocumentCasePage(Base):
@@ -231,6 +236,49 @@ class CaseExtractionAnnotation(Base):
     )
 
     case: Mapped[DocumentCase] = relationship(back_populates="extraction_annotations")
+
+
+class CaseTextReconstruction(Base):
+    __tablename__ = "case_text_reconstructions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('GENERATED', 'REVIEWED')",
+            name="ck_case_text_reconstruction_status",
+        ),
+        CheckConstraint("page_count >= 1", name="ck_case_text_reconstruction_pages"),
+        CheckConstraint("token_count >= 0", name="ck_case_text_reconstruction_tokens"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    case_id: Mapped[str] = mapped_column(
+        ForeignKey("document_cases.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    parent_reconstruction_id: Mapped[str | None] = mapped_column(
+        ForeignKey("case_text_reconstructions.id"), nullable=True
+    )
+    algorithm_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    source_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="GENERATED", index=True
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    reconstructed_text: Mapped[str] = mapped_column(Unicode(), nullable=False)
+    structure_json: Mapped[str] = mapped_column(Unicode(), nullable=False)
+    page_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    token_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    reviewed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    review_note: Mapped[str | None] = mapped_column(Unicode(), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    case: Mapped[DocumentCase] = relationship(back_populates="text_reconstructions")
 
 
 class OcrRun(Base):

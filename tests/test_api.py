@@ -16,6 +16,7 @@ from app.core.config import PROJECT_ROOT, Settings
 from app.db.models import (
     AnnotationDocument,
     AnnotationPage,
+    CaseTextReconstruction,
     DocumentCase,
     DocumentCasePage,
     OcrLayoutRegion,
@@ -75,6 +76,96 @@ def test_health_reports_synchronous_mode() -> None:
 
     assert response.status_code == 200
     assert response.json()["processing_mode"] == "synchronous"
+
+
+def test_text_reconstruction_review_creates_version_and_preserves_unicode() -> None:
+    with _client() as client:
+        imported = client.post(
+            "/api/v1/annotation/documents",
+            files={"file": ("reconstruction.pdf", _two_page_pdf(), "application/pdf")},
+        ).json()["document"]
+        case_id = str(uuid4())
+        reconstruction_id = str(uuid4())
+        with client.app.state.database.session() as session:
+            session.add(
+                DocumentCase(
+                    id=case_id,
+                    document_id=imported["id"],
+                    case_index=1,
+                    status="AUTO_GROUPED",
+                    is_active=True,
+                    start_page_number=1,
+                    end_page_number=2,
+                )
+            )
+            session.flush()
+            for index, page in enumerate(imported["pages"], start=1):
+                session.add(
+                    DocumentCasePage(
+                        id=str(uuid4()),
+                        case_id=case_id,
+                        page_id=page["id"],
+                        page_order=index,
+                        page_role="NOTE" if index == 1 else "APPLICANT_DATA",
+                    )
+                )
+            session.add(
+                CaseTextReconstruction(
+                    id=reconstruction_id,
+                    case_id=case_id,
+                    algorithm_version="test-v1",
+                    source_fingerprint="a" * 64,
+                    status="GENERATED",
+                    is_active=True,
+                    reconstructed_text="[PAGE 1]\nBản dịch tiếng Việt",
+                    structure_json=json.dumps({"pages": []}),
+                    page_count=2,
+                    token_count=3,
+                )
+            )
+
+        queued = client.get("/api/v1/text-reconstruction/review/next")
+        assert queued.status_code == 200
+        queued_payload = queued.json()
+        assert queued_payload["stats"] == {"pending": 1, "reviewed": 0, "total": 1}
+        assert len(queued_payload["current"]["pages"]) == 2
+        assert queued_payload["current"]["reconstructed_text"].endswith(
+            "Bản dịch tiếng Việt"
+        )
+
+        corrected = "[PAGE 1]\nBản dịch tiếng Việt không chính thức"
+        reviewed = client.put(
+            f"/api/v1/text-reconstruction/{reconstruction_id}/review",
+            json={
+                "reviewed_by": "thai",
+                "review_note": "đã sửa thứ tự đọc",
+                "reconstructed_text": corrected,
+            },
+        )
+        assert reviewed.status_code == 200
+        reviewed_payload = reviewed.json()
+        new_id = reviewed_payload["reconstruction"]["id"]
+        assert new_id != reconstruction_id
+        assert reviewed_payload["reconstruction"]["parent_reconstruction_id"] == reconstruction_id
+        assert reviewed_payload["reconstruction"]["status"] == "REVIEWED"
+        assert reviewed_payload["reconstructed_text"] == corrected
+
+        empty_queue = client.get("/api/v1/text-reconstruction/review/next").json()
+        assert empty_queue["current"] is None
+        assert empty_queue["stats"] == {"pending": 0, "reviewed": 1, "total": 1}
+
+        with client.app.state.database.session() as session:
+            versions = list(
+                session.scalars(
+                    select(CaseTextReconstruction)
+                    .where(CaseTextReconstruction.case_id == case_id)
+                    .order_by(CaseTextReconstruction.created_at.asc())
+                ).all()
+            )
+            assert len(versions) == 2
+            assert versions[0].is_active is False
+            assert versions[1].is_active is True
+            assert versions[1].reconstructed_text == corrected
 
 
 def test_cors_wildcard_allows_any_origin_without_cookie_credentials() -> None:
