@@ -65,6 +65,7 @@ class OcrReviewRunInfo(BaseModel):
     orientation_confidence: float | None
     preprocess_version: str | None
     preprocess_metadata: dict[str, Any] | None
+    created_at: datetime
     review_id: str | None
     include_in_llm: bool | None
     reviewed_by: str | None

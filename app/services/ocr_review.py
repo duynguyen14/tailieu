@@ -54,7 +54,12 @@ class OcrReviewService:
         self._database = database
         self._storage = storage
 
-    def get_next_review(self) -> tuple[OcrReviewDetail | None, OcrReviewStats]:
+    def get_next_review(
+        self,
+        *,
+        search_id: str | None = None,
+        sort_order: str = "NEWEST",
+    ) -> tuple[OcrReviewDetail | None, OcrReviewStats]:
         with self._database.session() as session:
             stats = self._statistics(session)
             active_review_exists = (
@@ -65,16 +70,22 @@ class OcrReviewService:
                 )
                 .exists()
             )
-            run_id = session.scalar(
-                select(OcrRun.id)
-                .where(
-                    OcrRun.is_active == true(),
-                    OcrRun.status == "COMPLETED",
-                    ~active_review_exists,
-                )
-                .order_by(OcrRun.created_at.asc())
-                .limit(1)
+            statement = select(OcrRun.id).where(
+                OcrRun.is_active == true(),
+                OcrRun.status == "COMPLETED",
+                ~active_review_exists,
             )
+            normalized_id = search_id.strip() if search_id else ""
+            if normalized_id:
+                statement = statement.where(
+                    (OcrRun.id == normalized_id) | (OcrRun.page_id == normalized_id)
+                )
+            order = (
+                OcrRun.created_at.desc()
+                if sort_order == "NEWEST"
+                else OcrRun.created_at.asc()
+            )
+            run_id = session.scalar(statement.order_by(order, OcrRun.id.asc()).limit(1))
         if run_id is None:
             return None, stats
         return self.get_detail(run_id), stats
@@ -466,6 +477,7 @@ class OcrReviewService:
                     if run.preprocess_metadata_json
                     else None
                 ),
+                created_at=run.created_at,
                 review_id=review.id if review else None,
                 include_in_llm=review.include_in_llm if review else None,
                 reviewed_by=review.reviewed_by if review else None,

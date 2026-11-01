@@ -33,8 +33,15 @@ def ocr_review_statistics(request: Request) -> OcrReviewStats:
 
 
 @router.get("/review/next", response_model=OcrReviewQueueResponse)
-def get_next_ocr_review(request: Request) -> OcrReviewQueueResponse:
-    current, stats = _service(request).get_next_review()
+def get_next_ocr_review(
+    request: Request,
+    search_id: str | None = Query(default=None, max_length=36),
+    sort_order: Literal["NEWEST", "OLDEST"] = Query(default="NEWEST"),
+) -> OcrReviewQueueResponse:
+    current, stats = _service(request).get_next_review(
+        search_id=search_id,
+        sort_order=sort_order,
+    )
     return OcrReviewQueueResponse(current=current, stats=stats)
 
 

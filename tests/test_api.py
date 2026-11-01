@@ -4,6 +4,7 @@ import base64
 import json
 import tempfile
 from contextlib import contextmanager
+from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -360,6 +361,70 @@ def test_grounded_ocr_review_preserves_raw_and_saves_corrected_snapshot() -> Non
             assert review_tokens[1].include_in_extraction is False
             assert review_regions[0].region_type == "SEAL"
 
+
+def test_ocr_review_queue_searches_run_or_page_id_and_sorts_by_created_date() -> None:
+    with _client() as client:
+        imported = client.post(
+            "/api/v1/annotation/documents",
+            files={"file": ("ocr-queue-sort.pdf", _two_page_pdf(), "application/pdf")},
+        ).json()
+        pages = imported["document"]["pages"]
+        older_run_id = str(uuid4())
+        newer_run_id = str(uuid4())
+        now = utc_now()
+        with client.app.state.database.session() as session:
+            session.add_all(
+                [
+                    OcrRun(
+                        id=older_run_id,
+                        page_id=pages[0]["id"],
+                        status="COMPLETED",
+                        is_active=True,
+                        model_name="det+rec",
+                        model_version="test-v1",
+                        device="gpu:0",
+                        created_at=now - timedelta(minutes=5),
+                    ),
+                    OcrRun(
+                        id=newer_run_id,
+                        page_id=pages[1]["id"],
+                        status="COMPLETED",
+                        is_active=True,
+                        model_name="det+rec",
+                        model_version="test-v1",
+                        device="gpu:0",
+                        created_at=now,
+                    ),
+                ]
+            )
+
+        newest = client.get(
+            "/api/v1/ocr-review/review/next",
+            params={"sort_order": "NEWEST"},
+        )
+        assert newest.status_code == 200
+        assert newest.json()["current"]["run"]["id"] == newer_run_id
+
+        oldest = client.get(
+            "/api/v1/ocr-review/review/next",
+            params={"sort_order": "OLDEST"},
+        )
+        assert oldest.status_code == 200
+        assert oldest.json()["current"]["run"]["id"] == older_run_id
+
+        by_page_id = client.get(
+            "/api/v1/ocr-review/review/next",
+            params={"search_id": pages[0]["id"], "sort_order": "NEWEST"},
+        )
+        assert by_page_id.status_code == 200
+        assert by_page_id.json()["current"]["run"]["id"] == older_run_id
+
+        by_run_id = client.get(
+            "/api/v1/ocr-review/review/next",
+            params={"search_id": newer_run_id, "sort_order": "OLDEST"},
+        )
+        assert by_run_id.status_code == 200
+        assert by_run_id.json()["current"]["page"]["id"] == pages[1]["id"]
 
 def test_grounded_ocr_review_can_skip_page_without_deleting_ocr_run() -> None:
     with _client() as client:
