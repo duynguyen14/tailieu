@@ -5,6 +5,7 @@
 -r requirements.txt
 Pillow>=11.0,<13.0
 numpy>=1.26,<3.0
+opencv-python>=4.10,<5.1
 paddleocr==3.7.0
 paddlepaddle-gpu==3.3.1
 

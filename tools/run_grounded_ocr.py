@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import tempfile
 import time
 from dataclasses import dataclass
 from decimal import Decimal
+from pathlib import Path
 from uuid import uuid4
 
 from sqlalchemy import select, true, update
@@ -30,7 +32,15 @@ from app.models.paddle_ocr_engine import OcrTokenPrediction, PaddleOcrEngine
 from app.models.paddle_orientation import (
     OrientationPrediction,
     PaddleOrientationClassifier,
-    normalized_png,
+)
+from app.models.ocr_preprocessing import (
+    PreparedOcrImage,
+    load_rgb_image,
+    ocr_quality_score,
+    orientation_probe,
+    png_bytes,
+    prepare_ocr_image,
+    recommended_upscale,
 )
 from app.schemas.annotation import ReviewStatus
 from app.services.storage import AnnotationStorage
@@ -42,6 +52,38 @@ class OcrSummary:
     completed: int = 0
     failed: int = 0
     tokens: int = 0
+
+
+@dataclass
+class EvaluatedCandidate:
+    prepared: PreparedOcrImage
+    tokens: list[OcrTokenPrediction]
+    score: float
+
+
+def _unique_angles(values: list[int]) -> list[int]:
+    result: list[int] = []
+    for value in values:
+        if value not in result:
+            result.append(value)
+    return result
+
+
+def candidate_angles(
+    prediction: OrientationPrediction,
+    *,
+    min_confidence: float,
+    fallback_all_angles: bool,
+) -> list[int]:
+    if prediction.confidence >= min_confidence:
+        return [prediction.angle]
+    if not fallback_all_angles:
+        return [prediction.angle]
+    return _unique_angles([prediction.predicted_angle, 0, 90, 180, 270])
+
+
+def _write_candidate(path: Path, prepared: PreparedOcrImage) -> None:
+    path.write_bytes(png_bytes(prepared.image))
 
 
 def parse_args() -> argparse.Namespace:
@@ -173,6 +215,7 @@ def complete_run(
     processed_image_relative_path: str | None,
     processed_width: int,
     processed_height: int,
+    preprocess_metadata: dict[str, object],
     preprocess_version: str,
     processing_time_ms: int,
 ) -> None:
@@ -221,6 +264,9 @@ def complete_run(
         run.processed_image_relative_path = processed_image_relative_path
         run.processed_width = processed_width
         run.processed_height = processed_height
+        run.preprocess_metadata_json = json.dumps(
+            preprocess_metadata, ensure_ascii=False, separators=(",", ":")
+        )
         run.preprocess_version = preprocess_version
         run.processing_time_ms = processing_time_ms
         run.error_message = None
@@ -301,28 +347,153 @@ def run(args: argparse.Namespace) -> OcrSummary:
                 device=engine.effective_device,
             )
             processed_relative_path: str | None = None
+            source_image = None
+            selected: EvaluatedCandidate | None = None
             try:
                 source_image_path = storage.resolve(page.image_relative_path)
-                orientation = (
-                    orientation_classifier.predict(source_image_path)
+                source_image = load_rgb_image(source_image_path)
+                probe_image, probe_detection = orientation_probe(
+                    source_image,
+                    thumbnail_max_side=settings.ocr_content_thumbnail_max_side,
+                    padding_ratio=settings.ocr_content_padding_ratio,
+                    min_components=settings.ocr_content_min_components,
+                    min_content_area_ratio=settings.ocr_content_min_area_ratio,
+                    max_crop_area_ratio=settings.ocr_content_max_crop_area_ratio,
+                )
+                orientation_prediction = (
+                    orientation_classifier.predict_image(probe_image)
                     if orientation_classifier
-                    else OrientationPrediction(angle=0, confidence=0.0)
-                )
-                effective_image_path = source_image_path
-                processed_width, processed_height = page.width, page.height
-                if orientation.angle:
-                    content, processed_width, processed_height = normalized_png(
-                        source_image_path, orientation
+                    else OrientationPrediction(
+                        angle=0, confidence=1.0, predicted_angle=0
                     )
-                    processed_relative_path = (
-                        f"ocr_preprocessed/{page.document_id}/{page.id}/{run_id}.png"
-                    )
-                    storage.write_bytes(processed_relative_path, content)
-                    effective_image_path = storage.resolve(processed_relative_path)
-                regions = (
-                    layout_detector.predict(effective_image_path) if layout_detector else []
                 )
-                tokens = engine.predict(effective_image_path)
+                probe_image.close()
+                angles = candidate_angles(
+                    orientation_prediction,
+                    min_confidence=settings.ocr_orientation_min_confidence,
+                    fallback_all_angles=(
+                        settings.ocr_orientation_fallback_all_angles
+                        and orientation_classifier is not None
+                    ),
+                )
+                prepare_kwargs = {
+                    "enable_content_crop": settings.ocr_enable_content_crop,
+                    "thumbnail_max_side": settings.ocr_content_thumbnail_max_side,
+                    "padding_ratio": settings.ocr_content_padding_ratio,
+                    "min_components": settings.ocr_content_min_components,
+                    "min_content_area_ratio": settings.ocr_content_min_area_ratio,
+                    "max_crop_area_ratio": settings.ocr_content_max_crop_area_ratio,
+                    "max_processed_side": settings.ocr_upscale_max_processed_side,
+                }
+                candidate_scores: dict[str, float] = {}
+                with tempfile.TemporaryDirectory(prefix="grounded-ocr-") as temp_dir:
+                    temp_root = Path(temp_dir)
+                    for angle in angles:
+                        prepared = prepare_ocr_image(
+                            source_image,
+                            rotation=angle,
+                            scale=1.0,
+                            **prepare_kwargs,
+                        )
+                        candidate_path = temp_root / f"angle-{angle}.png"
+                        _write_candidate(candidate_path, prepared)
+                        candidate_tokens = engine.predict(candidate_path)
+                        score = ocr_quality_score(candidate_tokens)
+                        candidate_scores[str(angle)] = round(score, 6)
+                        candidate = EvaluatedCandidate(
+                            prepared=prepared,
+                            tokens=candidate_tokens,
+                            score=score,
+                        )
+                        if selected is None or candidate.score > selected.score:
+                            if selected is not None:
+                                selected.prepared.image.close()
+                            selected = candidate
+                        else:
+                            prepared.image.close()
+
+                    if selected is None:
+                        raise RuntimeError("OCR preprocessing produced no candidate image.")
+
+                    upscale_attempted = 1.0
+                    if settings.ocr_enable_small_text_upscale:
+                        upscale_attempted = recommended_upscale(
+                            selected.tokens,
+                            target_text_height=settings.ocr_upscale_target_text_height,
+                            max_factor=settings.ocr_upscale_max_factor,
+                        )
+                    if upscale_attempted > 1.05:
+                        upscaled = prepare_ocr_image(
+                            source_image,
+                            rotation=selected.prepared.rotation,
+                            scale=upscale_attempted,
+                            **prepare_kwargs,
+                        )
+                        upscaled_path = temp_root / "selected-upscaled.png"
+                        _write_candidate(upscaled_path, upscaled)
+                        upscaled_tokens = engine.predict(upscaled_path)
+                        upscaled_score = ocr_quality_score(upscaled_tokens)
+                        candidate_scores[
+                            f"{upscaled.rotation}@{upscaled.scale:.3f}x"
+                        ] = round(upscaled_score, 6)
+                        # A tiny score variation is normal after interpolation.
+                        # Prefer the larger image when it preserves quality, as
+                        # its boxes are easier to review and correct.
+                        if upscaled_score >= selected.score - 0.05:
+                            selected.prepared.image.close()
+                            selected = EvaluatedCandidate(
+                                prepared=upscaled,
+                                tokens=upscaled_tokens,
+                                score=upscaled_score,
+                            )
+                        else:
+                            upscaled.image.close()
+
+                    final_path = temp_root / "selected-final.png"
+                    _write_candidate(final_path, selected.prepared)
+                    regions = (
+                        layout_detector.predict(final_path) if layout_detector else []
+                    )
+                    tokens = selected.tokens
+                    processed_width, processed_height = selected.prepared.processed_size
+                    if selected.prepared.changed:
+                        processed_relative_path = (
+                            f"ocr_preprocessed/{page.document_id}/{page.id}/{run_id}.png"
+                        )
+                        storage.write_bytes(
+                            processed_relative_path, final_path.read_bytes()
+                        )
+
+                    preprocess_metadata = selected.prepared.metadata()
+                    preprocess_metadata.update(
+                        {
+                            "orientation_probe_bbox": (
+                                list(probe_detection.bbox)
+                                if probe_detection.bbox
+                                else None
+                            ),
+                            "orientation_probe_components": (
+                                probe_detection.component_count
+                            ),
+                            "orientation_predicted_angle": (
+                                orientation_prediction.predicted_angle
+                            ),
+                            "orientation_confidence": round(
+                                orientation_prediction.confidence, 6
+                            ),
+                            "orientation_candidates": angles,
+                            "candidate_scores": candidate_scores,
+                            "selected_quality_score": round(selected.score, 6),
+                            "upscale_attempted": round(upscale_attempted, 6),
+                        }
+                    )
+                    orientation = OrientationPrediction(
+                        angle=selected.prepared.rotation,
+                        confidence=orientation_prediction.confidence,
+                        predicted_angle=orientation_prediction.predicted_angle,
+                    )
+                    selected.prepared.image.close()
+                source_image.close()
                 elapsed_ms = round((time.perf_counter() - started) * 1000)
                 complete_run(
                     database,
@@ -334,6 +505,7 @@ def run(args: argparse.Namespace) -> OcrSummary:
                     processed_image_relative_path=processed_relative_path,
                     processed_width=processed_width,
                     processed_height=processed_height,
+                    preprocess_metadata=preprocess_metadata,
                     preprocess_version=settings.ocr_preprocess_version,
                     processing_time_ms=elapsed_ms,
                 )
@@ -343,9 +515,14 @@ def run(args: argparse.Namespace) -> OcrSummary:
                     f"[{position}/{len(pages)}] page={page.id} "
                     f"tokens={len(tokens)} exclusion_regions={len(regions)} "
                     f"orientation={orientation.angle} "
+                    f"scale={preprocess_metadata['scale']} "
                     f"time={elapsed_ms}ms"
                 )
             except Exception as exc:
+                if selected is not None:
+                    selected.prepared.image.close()
+                if source_image is not None:
+                    source_image.close()
                 if processed_relative_path:
                     storage.remove_file(processed_relative_path)
                 elapsed_ms = round((time.perf_counter() - started) * 1000)

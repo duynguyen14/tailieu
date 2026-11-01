@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import math
 from uuid import uuid4
 
@@ -460,6 +461,11 @@ class OcrReviewService:
                     else None
                 ),
                 preprocess_version=run.preprocess_version,
+                preprocess_metadata=(
+                    json.loads(run.preprocess_metadata_json)
+                    if run.preprocess_metadata_json
+                    else None
+                ),
                 review_id=review.id if review else None,
                 include_in_llm=review.include_in_llm if review else None,
                 reviewed_by=review.reviewed_by if review else None,

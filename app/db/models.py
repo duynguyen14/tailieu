@@ -331,6 +331,7 @@ class OcrRun(Base):
     )
     processed_width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     processed_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    preprocess_metadata_json: Mapped[str | None] = mapped_column(Unicode(), nullable=True)
     preprocess_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now

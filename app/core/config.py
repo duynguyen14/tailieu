@@ -122,7 +122,18 @@ class Settings(BaseSettings):
     ocr_orientation_model_name: str = "PP-LCNet_x1_0_doc_ori"
     ocr_orientation_model_dir: Path | None = None
     ocr_orientation_min_confidence: float = Field(default=0.80, ge=0.0, le=1.0)
-    ocr_preprocess_version: str = "orientation-v1"
+    ocr_orientation_fallback_all_angles: bool = True
+    ocr_enable_content_crop: bool = True
+    ocr_content_thumbnail_max_side: int = Field(default=1400, ge=320, le=4000)
+    ocr_content_padding_ratio: float = Field(default=0.05, ge=0.0, le=0.25)
+    ocr_content_min_components: int = Field(default=8, ge=1, le=1000)
+    ocr_content_min_area_ratio: float = Field(default=0.0002, ge=0.0, le=0.10)
+    ocr_content_max_crop_area_ratio: float = Field(default=0.95, ge=0.10, le=1.0)
+    ocr_enable_small_text_upscale: bool = True
+    ocr_upscale_target_text_height: int = Field(default=30, ge=12, le=96)
+    ocr_upscale_max_factor: float = Field(default=2.5, ge=1.0, le=4.0)
+    ocr_upscale_max_processed_side: int = Field(default=5000, ge=1000, le=12000)
+    ocr_preprocess_version: str = "orientation-content-v2"
     paddle_pdx_model_source: str = "BOS"
     paddle_pdx_disable_model_source_check: bool = True
 

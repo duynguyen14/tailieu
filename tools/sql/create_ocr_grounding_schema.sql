@@ -33,6 +33,7 @@ BEGIN
         processed_image_relative_path NVARCHAR(1000) NULL,
         processed_width    INT           NULL,
         processed_height   INT           NULL,
+        preprocess_metadata_json NVARCHAR(MAX) NULL,
         preprocess_version NVARCHAR(100) NULL,
         created_at         DATETIMEOFFSET(7) NOT NULL
             CONSTRAINT DF_ocr_runs_created_at DEFAULT SYSUTCDATETIME(),
@@ -80,6 +81,10 @@ GO
 
 IF COL_LENGTH(N'dbo.ocr_runs', N'processed_height') IS NULL
     ALTER TABLE dbo.ocr_runs ADD processed_height INT NULL;
+GO
+
+IF COL_LENGTH(N'dbo.ocr_runs', N'preprocess_metadata_json') IS NULL
+    ALTER TABLE dbo.ocr_runs ADD preprocess_metadata_json NVARCHAR(MAX) NULL;
 GO
 
 IF COL_LENGTH(N'dbo.ocr_runs', N'preprocess_version') IS NULL

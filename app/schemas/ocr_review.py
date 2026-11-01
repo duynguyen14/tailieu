@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -64,6 +64,7 @@ class OcrReviewRunInfo(BaseModel):
     orientation_angle: int
     orientation_confidence: float | None
     preprocess_version: str | None
+    preprocess_metadata: dict[str, Any] | None
     review_id: str | None
     include_in_llm: bool | None
     reviewed_by: str | None

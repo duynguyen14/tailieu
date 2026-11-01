@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from app.core.config import Settings
@@ -17,6 +18,7 @@ class OrientationModelUnavailableError(RuntimeError):
 class OrientationPrediction:
     angle: int
     confidence: float
+    predicted_angle: int = 0
 
 
 def _result_payload(result: Any) -> dict[str, Any]:
@@ -77,7 +79,21 @@ class PaddleOrientationClassifier:
     def predict(self, image_path: Path) -> OrientationPrediction:
         if not image_path.is_file():
             raise FileNotFoundError(f"Orientation input image does not exist: {image_path}")
-        output = self._model.predict(input=str(image_path), batch_size=1)
+        return self._predict_input(str(image_path))
+
+    def predict_image(self, image: Any) -> OrientationPrediction:
+        """Classify an in-memory RGB image used as a content-focused probe."""
+
+        try:
+            with TemporaryDirectory(prefix="orientation-probe-") as temp_dir:
+                probe_path = Path(temp_dir) / "probe.png"
+                image.convert("RGB").save(probe_path, format="PNG", optimize=True)
+                return self._predict_input(str(probe_path))
+        except Exception as exc:
+            raise RuntimeError(f"Could not prepare orientation probe image: {exc}") from exc
+
+    def _predict_input(self, value: Any) -> OrientationPrediction:
+        output = self._model.predict(input=value, batch_size=1)
         try:
             payload = _result_payload(next(iter(output)))
         except StopIteration as exc:
@@ -96,7 +112,11 @@ class PaddleOrientationClassifier:
             if confidence >= self._settings.ocr_orientation_min_confidence
             else 0
         )
-        return OrientationPrediction(angle=applied_angle, confidence=confidence)
+        return OrientationPrediction(
+            angle=applied_angle,
+            confidence=confidence,
+            predicted_angle=predicted_angle,
+        )
 
 
 def normalized_png(
