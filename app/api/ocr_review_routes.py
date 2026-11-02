@@ -28,7 +28,7 @@ def _service(request: Request) -> OcrReviewService:
 
 @router.get("/statistics", response_model=OcrReviewStats)
 def ocr_review_statistics(request: Request) -> OcrReviewStats:
-    _, stats = _service(request).get_next_review()
+    _, stats, _ = _service(request).get_next_review()
     return stats
 
 
@@ -50,13 +50,17 @@ def get_next_ocr_review(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="to_index must be greater than or equal to from_index.",
         )
-    current, stats = _service(request).get_next_review(
+    current, stats, current_index = _service(request).get_next_review(
         search_id=search_id,
         sort_order=sort_order,
         from_index=from_index,
         to_index=to_index,
     )
-    return OcrReviewQueueResponse(current=current, stats=stats)
+    return OcrReviewQueueResponse(
+        current=current,
+        current_index=current_index,
+        stats=stats,
+    )
 
 
 @router.get("/history", response_model=OcrReviewHistoryResponse)

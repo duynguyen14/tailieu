@@ -132,6 +132,7 @@ class OcrReviewStats(BaseModel):
 
 class OcrReviewQueueResponse(BaseModel):
     current: OcrReviewDetail | None
+    current_index: int | None = Field(default=None, ge=0)
     stats: OcrReviewStats
 
 

@@ -61,9 +61,10 @@ class OcrReviewService:
         sort_order: str = "NEWEST",
         from_index: int | None = None,
         to_index: int | None = None,
-    ) -> tuple[OcrReviewDetail | None, OcrReviewStats]:
+    ) -> tuple[OcrReviewDetail | None, OcrReviewStats, int | None]:
         with self._database.session() as session:
             stats = self._statistics(session)
+            current_index: int | None = None
             active_review_exists = (
                 select(OcrReview.id)
                 .where(
@@ -93,6 +94,13 @@ class OcrReviewService:
                 run_id = session.scalar(
                     statement.order_by(order, OcrRun.id.asc()).limit(1)
                 )
+                if run_id is not None:
+                    ordered_run_ids = list(
+                        session.scalars(
+                            completed_statement.order_by(order, OcrRun.id.asc())
+                        ).all()
+                    )
+                    current_index = ordered_run_ids.index(run_id)
             elif from_index is not None and to_index is not None:
                 # Rank the complete active OCR population before filtering out
                 # reviewed rows. Otherwise every successful review would shift
@@ -116,14 +124,12 @@ class OcrReviewService:
                             )
                         ).all()
                     )
-                run_id = next(
-                    (
-                        candidate_id
-                        for candidate_id in range_run_ids
-                        if candidate_id not in reviewed_run_ids
-                    ),
-                    None,
-                )
+                run_id = None
+                for local_index, candidate_id in enumerate(range_run_ids):
+                    if candidate_id not in reviewed_run_ids:
+                        run_id = candidate_id
+                        current_index = from_index + local_index
+                        break
             else:
                 run_id = session.scalar(
                     completed_statement
@@ -132,8 +138,8 @@ class OcrReviewService:
                     .limit(1)
                 )
         if run_id is None:
-            return None, stats
-        return self.get_detail(run_id), stats
+            return None, stats, None
+        return self.get_detail(run_id), stats, current_index
 
     def get_detail(self, run_id: str) -> OcrReviewDetail:
         with self._database.session() as session:

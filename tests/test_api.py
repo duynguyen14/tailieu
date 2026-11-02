@@ -418,6 +418,7 @@ def test_ocr_review_queue_searches_run_or_page_id_and_sorts_by_created_date() ->
         )
         assert by_page_id.status_code == 200
         assert by_page_id.json()["current"]["run"]["id"] == older_run_id
+        assert by_page_id.json()["current_index"] == 1
 
         by_run_id = client.get(
             "/api/v1/ocr-review/review/next",
@@ -425,6 +426,7 @@ def test_ocr_review_queue_searches_run_or_page_id_and_sorts_by_created_date() ->
         )
         assert by_run_id.status_code == 200
         assert by_run_id.json()["current"]["page"]["id"] == pages[1]["id"]
+        assert by_run_id.json()["current_index"] == 1
 
 
 def test_ocr_review_queue_keeps_manual_index_range_stable_after_review() -> None:
@@ -469,6 +471,7 @@ def test_ocr_review_queue_keeps_manual_index_range_stable_after_review() -> None
         )
         assert first_range.status_code == 200
         assert first_range.json()["current"]["run"]["id"] == newer_run_id
+        assert first_range.json()["current_index"] == 0
 
         second_range = client.get(
             "/api/v1/ocr-review/review/next",
@@ -476,6 +479,7 @@ def test_ocr_review_queue_keeps_manual_index_range_stable_after_review() -> None
         )
         assert second_range.status_code == 200
         assert second_range.json()["current"]["run"]["id"] == older_run_id
+        assert second_range.json()["current_index"] == 1
 
         reviewed = client.put(
             f"/api/v1/ocr-review/{newer_run_id}/review",
@@ -494,6 +498,7 @@ def test_ocr_review_queue_keeps_manual_index_range_stable_after_review() -> None
         )
         assert completed_first_range.status_code == 200
         assert completed_first_range.json()["current"] is None
+        assert completed_first_range.json()["current_index"] is None
 
         unchanged_second_range = client.get(
             "/api/v1/ocr-review/review/next",
@@ -501,6 +506,7 @@ def test_ocr_review_queue_keeps_manual_index_range_stable_after_review() -> None
         )
         assert unchanged_second_range.status_code == 200
         assert unchanged_second_range.json()["current"]["run"]["id"] == older_run_id
+        assert unchanged_second_range.json()["current_index"] == 1
 
         incomplete_range = client.get(
             "/api/v1/ocr-review/review/next",
