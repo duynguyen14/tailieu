@@ -37,10 +37,24 @@ def get_next_ocr_review(
     request: Request,
     search_id: str | None = Query(default=None, max_length=36),
     sort_order: Literal["NEWEST", "OLDEST"] = Query(default="NEWEST"),
+    from_index: int | None = Query(default=None, ge=0),
+    to_index: int | None = Query(default=None, ge=0),
 ) -> OcrReviewQueueResponse:
+    if (from_index is None) != (to_index is None):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="from_index and to_index must be supplied together.",
+        )
+    if from_index is not None and to_index is not None and to_index < from_index:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="to_index must be greater than or equal to from_index.",
+        )
     current, stats = _service(request).get_next_review(
         search_id=search_id,
         sort_order=sort_order,
+        from_index=from_index,
+        to_index=to_index,
     )
     return OcrReviewQueueResponse(current=current, stats=stats)
 

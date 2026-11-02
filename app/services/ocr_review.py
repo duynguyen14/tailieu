@@ -59,6 +59,8 @@ class OcrReviewService:
         *,
         search_id: str | None = None,
         sort_order: str = "NEWEST",
+        from_index: int | None = None,
+        to_index: int | None = None,
     ) -> tuple[OcrReviewDetail | None, OcrReviewStats]:
         with self._database.session() as session:
             stats = self._statistics(session)
@@ -70,22 +72,65 @@ class OcrReviewService:
                 )
                 .exists()
             )
-            statement = select(OcrRun.id).where(
+            completed_statement = select(OcrRun.id).where(
                 OcrRun.is_active == true(),
                 OcrRun.status == "COMPLETED",
-                ~active_review_exists,
             )
             normalized_id = search_id.strip() if search_id else ""
-            if normalized_id:
-                statement = statement.where(
-                    (OcrRun.id == normalized_id) | (OcrRun.page_id == normalized_id)
-                )
             order = (
                 OcrRun.created_at.desc()
                 if sort_order == "NEWEST"
                 else OcrRun.created_at.asc()
             )
-            run_id = session.scalar(statement.order_by(order, OcrRun.id.asc()).limit(1))
+            if normalized_id:
+                # Exact ID lookup intentionally ignores the numeric range so a
+                # reviewer can inspect a pending run without changing their
+                # current work interval.
+                statement = completed_statement.where(
+                    ~active_review_exists,
+                    (OcrRun.id == normalized_id) | (OcrRun.page_id == normalized_id),
+                )
+                run_id = session.scalar(
+                    statement.order_by(order, OcrRun.id.asc()).limit(1)
+                )
+            elif from_index is not None and to_index is not None:
+                # Rank the complete active OCR population before filtering out
+                # reviewed rows. Otherwise every successful review would shift
+                # all later offsets and two manually assigned ranges would
+                # overlap or skip work.
+                range_run_ids = list(
+                    session.scalars(
+                        completed_statement
+                        .order_by(order, OcrRun.id.asc())
+                        .offset(from_index)
+                        .limit(to_index - from_index + 1)
+                    ).all()
+                )
+                reviewed_run_ids: set[str] = set()
+                if range_run_ids:
+                    reviewed_run_ids = set(
+                        session.scalars(
+                            select(OcrReview.ocr_run_id).where(
+                                OcrReview.is_active == true(),
+                                OcrReview.ocr_run_id.in_(range_run_ids),
+                            )
+                        ).all()
+                    )
+                run_id = next(
+                    (
+                        candidate_id
+                        for candidate_id in range_run_ids
+                        if candidate_id not in reviewed_run_ids
+                    ),
+                    None,
+                )
+            else:
+                run_id = session.scalar(
+                    completed_statement
+                    .where(~active_review_exists)
+                    .order_by(order, OcrRun.id.asc())
+                    .limit(1)
+                )
         if run_id is None:
             return None, stats
         return self.get_detail(run_id), stats

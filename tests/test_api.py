@@ -426,6 +426,94 @@ def test_ocr_review_queue_searches_run_or_page_id_and_sorts_by_created_date() ->
         assert by_run_id.status_code == 200
         assert by_run_id.json()["current"]["page"]["id"] == pages[1]["id"]
 
+
+def test_ocr_review_queue_keeps_manual_index_range_stable_after_review() -> None:
+    with _client() as client:
+        imported = client.post(
+            "/api/v1/annotation/documents",
+            files={"file": ("ocr-range.pdf", _two_page_pdf(), "application/pdf")},
+        ).json()
+        pages = imported["document"]["pages"]
+        older_run_id = str(uuid4())
+        newer_run_id = str(uuid4())
+        now = utc_now()
+        with client.app.state.database.session() as session:
+            session.add_all(
+                [
+                    OcrRun(
+                        id=older_run_id,
+                        page_id=pages[0]["id"],
+                        status="COMPLETED",
+                        is_active=True,
+                        model_name="det+rec",
+                        model_version="test-v1",
+                        device="gpu:0",
+                        created_at=now - timedelta(minutes=5),
+                    ),
+                    OcrRun(
+                        id=newer_run_id,
+                        page_id=pages[1]["id"],
+                        status="COMPLETED",
+                        is_active=True,
+                        model_name="det+rec",
+                        model_version="test-v1",
+                        device="gpu:0",
+                        created_at=now,
+                    ),
+                ]
+            )
+
+        first_range = client.get(
+            "/api/v1/ocr-review/review/next",
+            params={"from_index": 0, "to_index": 0, "sort_order": "NEWEST"},
+        )
+        assert first_range.status_code == 200
+        assert first_range.json()["current"]["run"]["id"] == newer_run_id
+
+        second_range = client.get(
+            "/api/v1/ocr-review/review/next",
+            params={"from_index": 1, "to_index": 1, "sort_order": "NEWEST"},
+        )
+        assert second_range.status_code == 200
+        assert second_range.json()["current"]["run"]["id"] == older_run_id
+
+        reviewed = client.put(
+            f"/api/v1/ocr-review/{newer_run_id}/review",
+            json={
+                "reviewed_by": "thai",
+                "include_in_llm": False,
+                "tokens": [],
+                "exclusion_regions": [],
+            },
+        )
+        assert reviewed.status_code == 200
+
+        completed_first_range = client.get(
+            "/api/v1/ocr-review/review/next",
+            params={"from_index": 0, "to_index": 0, "sort_order": "NEWEST"},
+        )
+        assert completed_first_range.status_code == 200
+        assert completed_first_range.json()["current"] is None
+
+        unchanged_second_range = client.get(
+            "/api/v1/ocr-review/review/next",
+            params={"from_index": 1, "to_index": 1, "sort_order": "NEWEST"},
+        )
+        assert unchanged_second_range.status_code == 200
+        assert unchanged_second_range.json()["current"]["run"]["id"] == older_run_id
+
+        incomplete_range = client.get(
+            "/api/v1/ocr-review/review/next",
+            params={"from_index": 0},
+        )
+        assert incomplete_range.status_code == 400
+        reversed_range = client.get(
+            "/api/v1/ocr-review/review/next",
+            params={"from_index": 5, "to_index": 4},
+        )
+        assert reversed_range.status_code == 400
+
+
 def test_grounded_ocr_review_can_skip_page_without_deleting_ocr_run() -> None:
     with _client() as client:
         imported = client.post(
