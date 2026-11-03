@@ -24,8 +24,12 @@ from app.schemas.ocr_review import (
     OcrBboxTextPreviewLine,
     OcrBboxTextPreviewToken,
     OcrReviewDetail,
+    OcrReviewDocumentDetail,
+    OcrReviewDocumentListResponse,
+    OcrReviewDocumentSummary,
     OcrReviewHistoryItem,
     OcrReviewHistoryResponse,
+    OcrReviewInclusionRequest,
     OcrReviewPageInfo,
     OcrReviewRegionView,
     OcrReviewRequest,
@@ -209,11 +213,14 @@ class OcrReviewService:
                 bbox=line.bbox,
                 text=line.text,
                 token_indexes=[int(token_id) for token_id in line.token_ids],
+                segments=list(line.segments),
+                quality_score=line.quality_score,
+                warnings=list(line.warnings),
             )
             for line in line_results
         ]
         return OcrBboxTextPreview(
-            algorithm_version="bbox-reading-order-v1",
+            algorithm_version="bbox-reading-order-v2",
             line_tolerance_ratio=self._line_tolerance_ratio,
             run=detail.run,
             page=detail.page,
@@ -348,6 +355,237 @@ class OcrReviewService:
             page_size=page_size,
             total_items=total_items,
             total_pages=math.ceil(total_items / page_size) if total_items else 0,
+        )
+
+    def get_documents(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        filename: str | None,
+        sort_order: str,
+    ) -> OcrReviewDocumentListResponse:
+        filters = [
+            OcrReview.is_active == true(),
+            OcrRun.is_active == true(),
+            OcrRun.status == "COMPLETED",
+        ]
+        if filename and filename.strip():
+            filters.append(
+                func.lower(AnnotationDocument.original_filename).like(
+                    f"%{filename.strip().lower()}%"
+                )
+            )
+
+        latest_reviewed_at = func.max(OcrReview.reviewed_at).label(
+            "latest_reviewed_at"
+        )
+        statement = (
+            select(
+                AnnotationDocument.id,
+                AnnotationDocument.original_filename,
+                AnnotationDocument.page_count,
+                func.count(OcrReview.id).label("reviewed_ocr_page_count"),
+                func.sum(
+                    case((OcrReview.include_in_llm == true(), 1), else_=0)
+                ).label("included_page_count"),
+                func.sum(
+                    case((OcrReview.include_in_llm == false(), 1), else_=0)
+                ).label("excluded_page_count"),
+                latest_reviewed_at,
+            )
+            .select_from(OcrReview)
+            .join(OcrRun, OcrRun.id == OcrReview.ocr_run_id)
+            .join(AnnotationPage, AnnotationPage.id == OcrRun.page_id)
+            .join(
+                AnnotationDocument,
+                AnnotationDocument.id == AnnotationPage.document_id,
+            )
+            .where(*filters)
+            .group_by(
+                AnnotationDocument.id,
+                AnnotationDocument.original_filename,
+                AnnotationDocument.page_count,
+            )
+        )
+        order = (
+            latest_reviewed_at.desc()
+            if sort_order == "NEWEST"
+            else latest_reviewed_at.asc()
+        )
+        with self._database.session() as session:
+            total_items = session.scalar(
+                select(func.count(func.distinct(AnnotationDocument.id)))
+                .select_from(OcrReview)
+                .join(OcrRun, OcrRun.id == OcrReview.ocr_run_id)
+                .join(AnnotationPage, AnnotationPage.id == OcrRun.page_id)
+                .join(
+                    AnnotationDocument,
+                    AnnotationDocument.id == AnnotationPage.document_id,
+                )
+                .where(*filters)
+            ) or 0
+            rows = session.execute(
+                statement
+                .order_by(order, AnnotationDocument.id.asc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            ).all()
+
+        return OcrReviewDocumentListResponse(
+            items=[self._document_summary(row) for row in rows],
+            page=page,
+            page_size=page_size,
+            total_items=total_items,
+            total_pages=math.ceil(total_items / page_size) if total_items else 0,
+        )
+
+    def get_document_detail(self, document_id: str) -> OcrReviewDocumentDetail:
+        with self._database.session() as session:
+            document = session.get(AnnotationDocument, document_id)
+            if document is None:
+                raise OcrReviewNotFoundError("OCR document was not found.")
+            rows = session.execute(
+                select(OcrReview, OcrRun, AnnotationPage)
+                .select_from(OcrReview)
+                .join(OcrRun, OcrRun.id == OcrReview.ocr_run_id)
+                .join(AnnotationPage, AnnotationPage.id == OcrRun.page_id)
+                .where(
+                    AnnotationPage.document_id == document_id,
+                    OcrReview.is_active == true(),
+                    OcrRun.is_active == true(),
+                    OcrRun.status == "COMPLETED",
+                )
+                .order_by(AnnotationPage.page_number.asc(), OcrRun.id.asc())
+            ).all()
+            if not rows:
+                raise OcrReviewNotFoundError(
+                    "This PDF has no active human-reviewed OCR pages."
+                )
+            summary = OcrReviewDocumentSummary(
+                document_id=document.id,
+                original_filename=document.original_filename,
+                document_page_count=document.page_count,
+                reviewed_ocr_page_count=len(rows),
+                included_page_count=sum(1 for review, _, _ in rows if review.include_in_llm),
+                excluded_page_count=sum(
+                    1 for review, _, _ in rows if not review.include_in_llm
+                ),
+                latest_reviewed_at=max(review.reviewed_at for review, _, _ in rows),
+            )
+            details = [self._detail(session, run) for _, run, _ in rows]
+        return OcrReviewDocumentDetail(document=summary, pages=details)
+
+    def set_inclusion(
+        self,
+        *,
+        run_id: str,
+        payload: OcrReviewInclusionRequest,
+    ) -> OcrReviewDetail:
+        reviewer = payload.reviewed_by.strip()
+        if not reviewer:
+            raise OcrReviewValidationError("Reviewer name cannot be empty.")
+
+        with self._database.session() as session:
+            run = session.scalar(
+                select(OcrRun).where(OcrRun.id == run_id).with_for_update()
+            )
+            if run is None:
+                raise OcrReviewNotFoundError("OCR run was not found.")
+            if not run.is_active or run.status != "COMPLETED":
+                raise OcrReviewConflictError(
+                    "Only an active COMPLETED OCR run can be changed."
+                )
+            previous = session.scalar(
+                select(OcrReview)
+                .where(
+                    OcrReview.ocr_run_id == run.id,
+                    OcrReview.is_active == true(),
+                )
+                .with_for_update()
+            )
+            if previous is None:
+                raise OcrReviewConflictError(
+                    "The OCR page must have an active human review first."
+                )
+
+            previous_tokens = list(
+                session.scalars(
+                    select(OcrReviewToken)
+                    .where(OcrReviewToken.review_id == previous.id)
+                    .order_by(OcrReviewToken.token_order.asc())
+                ).all()
+            )
+            previous_regions = list(
+                session.scalars(
+                    select(OcrReviewRegion)
+                    .where(OcrReviewRegion.review_id == previous.id)
+                    .order_by(OcrReviewRegion.region_order.asc())
+                ).all()
+            )
+            now = utc_now()
+            previous.is_active = False
+            previous.updated_at = now
+            review = OcrReview(
+                id=str(uuid4()),
+                ocr_run_id=run.id,
+                parent_review_id=previous.id,
+                status="REVIEWED",
+                is_active=True,
+                include_in_llm=payload.include_in_llm,
+                reviewed_by=reviewer,
+                review_note=(
+                    payload.review_note.strip()
+                    if payload.review_note and payload.review_note.strip()
+                    else previous.review_note
+                ),
+                reviewed_at=now,
+            )
+            session.add(review)
+            session.flush()
+            for token in previous_tokens:
+                session.add(
+                    OcrReviewToken(
+                        id=str(uuid4()),
+                        review_id=review.id,
+                        source_token_id=token.source_token_id,
+                        token_order=token.token_order,
+                        reviewed_text=token.reviewed_text,
+                        x1=token.x1,
+                        y1=token.y1,
+                        x2=token.x2,
+                        y2=token.y2,
+                        include_in_extraction=token.include_in_extraction,
+                        ignored_reason=token.ignored_reason,
+                    )
+                )
+            for region in previous_regions:
+                session.add(
+                    OcrReviewRegion(
+                        id=str(uuid4()),
+                        review_id=review.id,
+                        source_region_id=region.source_region_id,
+                        region_order=region.region_order,
+                        region_type=region.region_type,
+                        x1=region.x1,
+                        y1=region.y1,
+                        x2=region.x2,
+                        y2=region.y2,
+                    )
+                )
+            session.flush()
+            return self._detail(session, run)
+
+    @staticmethod
+    def _document_summary(row) -> OcrReviewDocumentSummary:
+        return OcrReviewDocumentSummary(
+            document_id=row.id,
+            original_filename=row.original_filename,
+            document_page_count=row.page_count,
+            reviewed_ocr_page_count=int(row.reviewed_ocr_page_count),
+            included_page_count=int(row.included_page_count or 0),
+            excluded_page_count=int(row.excluded_page_count or 0),
+            latest_reviewed_at=row.latest_reviewed_at,
         )
 
     def review(self, *, run_id: str, payload: OcrReviewRequest) -> OcrReviewDetail:

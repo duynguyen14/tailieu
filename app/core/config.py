@@ -94,7 +94,7 @@ class Settings(BaseSettings):
     table_assume_first_row_header: bool = True
 
     # Deterministic OCR token -> structured plain-text reconstruction.
-    text_reconstruction_version: str = "text-reconstruction-v1"
+    text_reconstruction_version: str = "text-reconstruction-v2"
     text_reconstruction_line_tolerance: float = Field(default=0.55, ge=0.1, le=1.5)
 
     # GPU-only OCR used to create grounded LLM inputs. PaddleOCR returns text,

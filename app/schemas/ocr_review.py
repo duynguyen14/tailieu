@@ -166,6 +166,35 @@ class OcrReviewHistoryResponse(BaseModel):
     total_pages: int = Field(ge=0)
 
 
+class OcrReviewDocumentSummary(BaseModel):
+    document_id: str
+    original_filename: str
+    document_page_count: int = Field(gt=0)
+    reviewed_ocr_page_count: int = Field(ge=0)
+    included_page_count: int = Field(ge=0)
+    excluded_page_count: int = Field(ge=0)
+    latest_reviewed_at: datetime
+
+
+class OcrReviewDocumentListResponse(BaseModel):
+    items: list[OcrReviewDocumentSummary]
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1)
+    total_items: int = Field(ge=0)
+    total_pages: int = Field(ge=0)
+
+
+class OcrReviewDocumentDetail(BaseModel):
+    document: OcrReviewDocumentSummary
+    pages: list[OcrReviewDetail]
+
+
+class OcrReviewInclusionRequest(BaseModel):
+    include_in_llm: bool
+    reviewed_by: str = Field(min_length=1, max_length=100)
+    review_note: str | None = Field(default=None, max_length=2000)
+
+
 class OcrBboxTextPreviewToken(BaseModel):
     token_index: int = Field(ge=1)
     source_token_id: str | None
@@ -179,6 +208,9 @@ class OcrBboxTextPreviewLine(BaseModel):
     bbox: BBox
     text: str
     token_indexes: list[int]
+    segments: list[str]
+    quality_score: float = Field(ge=0.0, le=1.0)
+    warnings: list[str]
 
 
 class OcrBboxTextPreview(BaseModel):

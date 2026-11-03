@@ -7,7 +7,10 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from app.schemas.ocr_review import (
     OcrBboxTextPreview,
     OcrReviewDetail,
+    OcrReviewDocumentDetail,
+    OcrReviewDocumentListResponse,
     OcrReviewHistoryResponse,
+    OcrReviewInclusionRequest,
     OcrReviewQueueResponse,
     OcrReviewRequest,
     OcrReviewStats,
@@ -84,6 +87,32 @@ def get_ocr_review_history(
     )
 
 
+@router.get("/documents", response_model=OcrReviewDocumentListResponse)
+def get_ocr_review_documents(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    filename: str | None = Query(default=None, max_length=255),
+    sort_order: Literal["NEWEST", "OLDEST"] = Query(default="NEWEST"),
+) -> OcrReviewDocumentListResponse:
+    return _service(request).get_documents(
+        page=page,
+        page_size=page_size,
+        filename=filename,
+        sort_order=sort_order,
+    )
+
+
+@router.get("/documents/{document_id}", response_model=OcrReviewDocumentDetail)
+def get_ocr_review_document(
+    request: Request, document_id: str
+) -> OcrReviewDocumentDetail:
+    try:
+        return _service(request).get_document_detail(document_id)
+    except OcrReviewNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
 @router.get("/{run_id}/bbox-text-preview", response_model=OcrBboxTextPreview)
 def get_bbox_text_preview(request: Request, run_id: str) -> OcrBboxTextPreview:
     try:
@@ -119,3 +148,19 @@ def review_ocr(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc),
         ) from exc
+
+
+@router.put("/{run_id}/inclusion", response_model=OcrReviewDetail)
+def set_ocr_review_inclusion(
+    request: Request,
+    run_id: str,
+    payload: OcrReviewInclusionRequest,
+) -> OcrReviewDetail:
+    try:
+        return _service(request).set_inclusion(run_id=run_id, payload=payload)
+    except OcrReviewNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except OcrReviewConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except OcrReviewValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

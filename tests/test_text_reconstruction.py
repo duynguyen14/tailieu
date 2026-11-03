@@ -51,8 +51,41 @@ def test_reconstruct_bbox_lines_exposes_line_boxes_and_token_membership() -> Non
     ]
     assert lines[0].bbox == (40, 40, 280, 65)
     assert lines[0].token_ids == ("1", "2")
+    assert lines[0].segments == ("Số: 1089-26/CDNC-LS",)
+    assert lines[0].quality_score == 1.0
+    assert lines[0].warnings == ()
     assert lines[1].bbox == (180, 80, 430, 105)
     assert lines[1].token_ids == ("4", "3")
+
+
+def test_group_token_lines_does_not_chain_adjacent_rows_together() -> None:
+    tokens = [
+        token("1", "Dòng một", (10, 0, 120, 20), 1),
+        token("2", "Dòng hai", (10, 12, 120, 32), 2),
+        token("3", "Dòng ba", (10, 24, 120, 44), 3),
+    ]
+
+    lines = group_token_lines(tokens)
+
+    assert [[item.text for item in line] for line in lines] == [
+        ["Dòng một"],
+        ["Dòng hai"],
+        ["Dòng ba"],
+    ]
+
+
+def test_reconstruct_bbox_lines_marks_large_horizontal_segments() -> None:
+    tokens = [
+        token("1", "Đơn vị: CỤC LÃNH SỰ", (10, 20, 210, 40), 1),
+        token("2", "Số gửi đi: 01", (500, 20, 650, 40), 2),
+    ]
+
+    lines = reconstruct_bbox_lines(tokens)
+
+    assert lines[0].text == "Đơn vị: CỤC LÃNH SỰ | Số gửi đi: 01"
+    assert lines[0].segments == ("Đơn vị: CỤC LÃNH SỰ", "Số gửi đi: 01")
+    assert lines[0].quality_score == 0.8
+    assert lines[0].warnings == ("MULTIPLE_X_SEGMENTS",)
 
 
 def test_reconstruct_table_uses_reviewed_cells_to_preserve_person_relationships() -> None:

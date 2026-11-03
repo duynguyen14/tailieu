@@ -37,8 +37,8 @@ from app.schemas.table_annotation import (
     TableElementType,
     TableRegionPayload,
 )
-from tools.run_grounded_ocr import eligible_pages
 from tools.reconstruct_case_text import _select_case_ids
+from tools.run_grounded_ocr import eligible_pages
 
 
 def _two_page_pdf() -> bytes:
@@ -270,6 +270,71 @@ def test_text_reconstruction_tool_selects_ready_pdf_by_filename_or_document() ->
                 **{**defaults, "document_id": unready_document["id"]}
             )
             assert _select_case_ids(session, document_args) == [unready_case_id]
+
+
+def test_text_reconstruction_treats_intentional_page_exclusion_as_decided() -> None:
+    with _client() as client:
+        document = client.post(
+            "/api/v1/annotation/documents",
+            files={"file": ("excluded-page.pdf", _two_page_pdf(), "application/pdf")},
+        ).json()["document"]
+        case_id = str(uuid4())
+        run_id = str(uuid4())
+        with client.app.state.database.session() as session:
+            session.add(
+                DocumentCase(
+                    id=case_id,
+                    document_id=document["id"],
+                    case_index=1,
+                    status="AUTO_GROUPED",
+                    is_active=True,
+                    start_page_number=1,
+                    end_page_number=1,
+                )
+            )
+            session.flush()
+            session.add_all(
+                [
+                    DocumentCasePage(
+                        id=str(uuid4()),
+                        case_id=case_id,
+                        page_id=document["pages"][0]["id"],
+                        page_order=1,
+                        page_role="NOTE",
+                    ),
+                    OcrRun(
+                        id=run_id,
+                        page_id=document["pages"][0]["id"],
+                        status="COMPLETED",
+                        is_active=True,
+                        model_name="det+rec",
+                        model_version="test-v1",
+                        device="gpu:0",
+                    ),
+                ]
+            )
+            session.flush()
+            session.add(
+                OcrReview(
+                    id=str(uuid4()),
+                    ocr_run_id=run_id,
+                    status="REVIEWED",
+                    is_active=True,
+                    include_in_llm=False,
+                    reviewed_by="thai",
+                )
+            )
+
+        args = argparse.Namespace(
+            case_id=None,
+            document_id=document["id"],
+            filename=None,
+            limit=0,
+            ready_only=True,
+            include_incomplete=False,
+        )
+        with client.app.state.database.session() as session:
+            assert _select_case_ids(session, args) == [case_id]
 
 
 def test_cors_wildcard_allows_any_origin_without_cookie_credentials() -> None:
@@ -676,6 +741,47 @@ def test_grounded_ocr_review_can_skip_page_without_deleting_ocr_run() -> None:
             )
             assert run is not None and run.is_active is True
             assert review is not None and review.include_in_llm is False
+
+        documents = client.get(
+            "/api/v1/ocr-review/documents",
+            params={"filename": "skip-ocr.pdf"},
+        )
+        assert documents.status_code == 200
+        document_payload = documents.json()
+        assert document_payload["total_items"] == 1
+        assert document_payload["items"][0]["included_page_count"] == 0
+        assert document_payload["items"][0]["excluded_page_count"] == 1
+
+        detail = client.get(
+            f"/api/v1/ocr-review/documents/{imported['document']['id']}"
+        )
+        assert detail.status_code == 200
+        assert len(detail.json()["pages"]) == 1
+        assert detail.json()["pages"][0]["run"]["include_in_llm"] is False
+
+        restored = client.put(
+            f"/api/v1/ocr-review/{run_id}/inclusion",
+            json={
+                "include_in_llm": True,
+                "reviewed_by": "thai",
+                "review_note": "restore after PDF-level verification",
+            },
+        )
+        assert restored.status_code == 200
+        restored_payload = restored.json()
+        assert restored_payload["run"]["include_in_llm"] is True
+        with client.app.state.database.session() as session:
+            versions = list(
+                session.scalars(
+                    select(OcrReview)
+                    .where(OcrReview.ocr_run_id == run_id)
+                    .order_by(OcrReview.created_at.asc())
+                ).all()
+            )
+            assert len(versions) == 2
+            assert versions[0].is_active is False
+            assert versions[1].is_active is True
+            assert versions[1].parent_review_id == versions[0].id
 
 
 def test_grounded_ocr_review_preserves_vietnamese_unicode_end_to_end() -> None:

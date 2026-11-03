@@ -73,8 +73,8 @@ def parse_args() -> argparse.Namespace:
         "--ready-only",
         action="store_true",
         help=(
-            "Select only cases whose every case page has an active approved OCR "
-            "review. With --limit, skipped/unready cases do not consume the limit."
+            "Select only cases whose every case page has an active human OCR "
+            "decision. Intentionally excluded pages do not block reconstruction."
         ),
     )
     parser.add_argument("--force", action="store_true")
@@ -93,8 +93,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _approved_ocr_review_exists():
-    """Correlated predicate for an approved active OCR review of one case page."""
+def _decided_ocr_review_exists():
+    """Correlated predicate for an active human OCR decision of one case page."""
 
     return (
         select(OcrReview.id)
@@ -104,7 +104,6 @@ def _approved_ocr_review_exists():
             OcrRun.status == "COMPLETED",
             OcrRun.is_active == true(),
             OcrReview.is_active == true(),
-            OcrReview.include_in_llm == true(),
         )
         .correlate(DocumentCasePage)
         .exists()
@@ -138,7 +137,7 @@ def _select_case_ids(session, args: argparse.Namespace) -> list[str]:
             select(DocumentCasePage.id)
             .where(
                 DocumentCasePage.case_id == DocumentCase.id,
-                ~_approved_ocr_review_exists(),
+                ~_decided_ocr_review_exists(),
             )
             .correlate(DocumentCase)
             .exists()
@@ -198,12 +197,26 @@ def _page_input(session, case_page: DocumentCasePage, *, allow_predicted_tables:
         select(OcrReview).where(
             OcrReview.ocr_run_id == run.id,
             OcrReview.is_active == true(),
-            OcrReview.include_in_llm == true(),
         )
     )
     if review is None:
         raise CaseNotReadyError(
-            f"Page {page.page_number} has no active approved OCR review."
+            f"Page {page.page_number} has no active human OCR review decision."
+        )
+    if not review.include_in_llm:
+        return (
+            None,
+            {
+                "page_id": page.id,
+                "page_number": page.page_number,
+                "page_label": page.label,
+                "page_role": case_page.page_role,
+                "ocr_run_id": run.id,
+                "ocr_review_id": review.id,
+                "included_in_reconstruction": False,
+                "table_annotation_id": None,
+                "token_count": 0,
+            },
         )
     reviewed_tokens = list(
         session.scalars(
@@ -254,6 +267,7 @@ def _page_input(session, case_page: DocumentCasePage, *, allow_predicted_tables:
         "page_role": case_page.page_role,
         "ocr_run_id": run.id,
         "ocr_review_id": review.id,
+        "included_in_reconstruction": True,
         "table_annotation_id": table_annotation.id if table_annotation else None,
         "token_count": len(tokens),
     }
@@ -308,10 +322,13 @@ def run(args: argparse.Namespace) -> ReconstructionSummary:
                             case_page,
                             allow_predicted_tables=args.allow_predicted_tables,
                         )
-                        page_inputs.append(page_input)
+                        if page_input is not None:
+                            page_inputs.append(page_input)
                         source_pages.append(source)
                     if not page_inputs:
-                        raise CaseNotReadyError("Case has no eligible pages.")
+                        raise CaseNotReadyError(
+                            "Case has no included human-approved OCR pages."
+                        )
 
                     source_payload = {
                         "case_id": case.id,

@@ -89,6 +89,9 @@ class BboxTextLineResult:
     bbox: BBox
     text: str
     token_ids: tuple[str, ...]
+    segments: tuple[str, ...]
+    quality_score: float
+    warnings: tuple[str, ...]
 
 
 @dataclass
@@ -97,7 +100,23 @@ class _Line:
 
     @property
     def center_y(self) -> float:
-        return sum(token.center_y for token in self.tokens) / len(self.tokens)
+        return float(median(token.center_y for token in self.tokens))
+
+    @property
+    def baseline_y(self) -> float:
+        return float(median(token.bbox[3] for token in self.tokens))
+
+    @property
+    def median_height(self) -> float:
+        return float(median(max(1, token.height) for token in self.tokens))
+
+    @property
+    def reference_y1(self) -> float:
+        return float(median(token.bbox[1] for token in self.tokens))
+
+    @property
+    def reference_y2(self) -> float:
+        return float(median(token.bbox[3] for token in self.tokens))
 
     @property
     def y1(self) -> int:
@@ -123,9 +142,41 @@ def normalize_text(value: str) -> str:
 
 
 def _vertical_overlap_ratio(token: ReconstructionToken, line: _Line) -> float:
-    overlap = max(0, min(token.bbox[3], line.y2) - max(token.bbox[1], line.y1))
-    denominator = max(1, min(token.height, line.y2 - line.y1))
+    overlap = max(
+        0,
+        min(token.bbox[3], line.reference_y2)
+        - max(token.bbox[1], line.reference_y1),
+    )
+    denominator = max(1.0, min(token.height, line.median_height))
     return overlap / denominator
+
+
+def _same_visual_line(
+    token: ReconstructionToken,
+    line: _Line,
+    *,
+    typical_height: float,
+    tolerance_ratio: float,
+) -> bool:
+    """Use a stable baseline band instead of an expanding line envelope."""
+
+    height_ratio = max(token.height, line.median_height) / max(
+        1.0, min(token.height, line.median_height)
+    )
+    if height_ratio > 2.5:
+        return False
+
+    local_height = max(1.0, min(token.height, line.median_height))
+    center_tolerance = max(
+        3.0,
+        min(typical_height * tolerance_ratio, local_height * 0.55),
+    )
+    baseline_tolerance = max(3.0, local_height * 0.60)
+    center_close = abs(token.center_y - line.center_y) <= center_tolerance
+    baseline_close = abs(token.bbox[3] - line.baseline_y) <= baseline_tolerance
+    return _vertical_overlap_ratio(token, line) >= 0.45 and (
+        center_close or baseline_close
+    )
 
 
 def group_token_lines(
@@ -137,21 +188,32 @@ def group_token_lines(
     if not clean:
         return []
     typical_height = median(max(1, token.height) for token in clean)
-    tolerance = max(3.0, typical_height * tolerance_ratio)
     lines: list[_Line] = []
     for token in sorted(clean, key=lambda item: (item.center_y, item.bbox[0], item.order)):
         candidates = [
             line
             for line in lines
-            if abs(token.center_y - line.center_y) <= tolerance
-            or _vertical_overlap_ratio(token, line) >= 0.40
+            if _same_visual_line(
+                token,
+                line,
+                typical_height=typical_height,
+                tolerance_ratio=tolerance_ratio,
+            )
         ]
         if candidates:
-            target = min(candidates, key=lambda line: abs(token.center_y - line.center_y))
+            target = min(
+                candidates,
+                key=lambda line: (
+                    abs(token.center_y - line.center_y)
+                    / max(1.0, line.median_height)
+                    + abs(token.bbox[3] - line.baseline_y)
+                    / max(1.0, line.median_height)
+                ),
+            )
             target.tokens.append(token)
         else:
             lines.append(_Line(tokens=[token]))
-    lines.sort(key=lambda line: (line.y1, line.center_y))
+    lines.sort(key=lambda line: (line.reference_y1, line.center_y, line.y1))
     return [
         sorted(line.tokens, key=lambda item: (item.bbox[0], item.center_y, item.order))
         for line in lines
@@ -164,6 +226,52 @@ def line_text(tokens: Sequence[ReconstructionToken]) -> str:
     )
 
 
+def _horizontal_segments(
+    tokens: Sequence[ReconstructionToken],
+) -> list[list[ReconstructionToken]]:
+    ordered = sorted(tokens, key=lambda item: (item.bbox[0], item.center_y, item.order))
+    if len(ordered) < 2:
+        return [ordered] if ordered else []
+    typical_height = float(median(max(1, token.height) for token in ordered))
+    character_widths = [
+        (token.bbox[2] - token.bbox[0]) / max(1, len(normalize_text(token.text)))
+        for token in ordered
+        if normalize_text(token.text)
+    ]
+    typical_character_width = float(median(character_widths or [typical_height * 0.5]))
+    gap_threshold = max(typical_height * 1.5, typical_character_width * 6.0)
+    segments: list[list[ReconstructionToken]] = [[ordered[0]]]
+    for token in ordered[1:]:
+        previous = segments[-1][-1]
+        horizontal_gap = token.bbox[0] - previous.bbox[2]
+        if horizontal_gap > gap_threshold:
+            segments.append([token])
+        else:
+            segments[-1].append(token)
+    return segments
+
+
+def _line_quality(
+    tokens: Sequence[ReconstructionToken], segments: Sequence[Sequence[ReconstructionToken]]
+) -> tuple[float, tuple[str, ...]]:
+    if not tokens:
+        return 0.0, ("EMPTY_LINE",)
+    warnings: list[str] = []
+    heights = [max(1, token.height) for token in tokens]
+    typical_height = float(median(heights))
+    center_spread = max(token.center_y for token in tokens) - min(
+        token.center_y for token in tokens
+    )
+    if center_spread > typical_height * 0.45:
+        warnings.append("LARGE_VERTICAL_SPREAD")
+    if max(heights) / max(1, min(heights)) > 2.25:
+        warnings.append("MIXED_TOKEN_HEIGHTS")
+    if len(segments) > 1:
+        warnings.append("MULTIPLE_X_SEGMENTS")
+    score = max(0.0, 1.0 - len(warnings) * 0.2)
+    return round(score, 3), tuple(warnings)
+
+
 def reconstruct_bbox_lines(
     tokens: Sequence[ReconstructionToken], *, tolerance_ratio: float = 0.55
 ) -> list[BboxTextLineResult]:
@@ -173,6 +281,11 @@ def reconstruct_bbox_lines(
     for line_index, line_tokens in enumerate(
         group_token_lines(tokens, tolerance_ratio=tolerance_ratio), start=1
     ):
+        segments = _horizontal_segments(line_tokens)
+        segment_texts = tuple(
+            text for segment in segments if (text := line_text(segment))
+        )
+        quality_score, warnings = _line_quality(line_tokens, segments)
         results.append(
             BboxTextLineResult(
                 line_index=line_index,
@@ -182,8 +295,11 @@ def reconstruct_bbox_lines(
                     max(token.bbox[2] for token in line_tokens),
                     max(token.bbox[3] for token in line_tokens),
                 ),
-                text=line_text(line_tokens),
+                text=" | ".join(segment_texts),
                 token_ids=tuple(token.id for token in line_tokens),
+                segments=segment_texts,
+                quality_score=quality_score,
+                warnings=warnings,
             )
         )
     return results
@@ -326,9 +442,11 @@ def reconstruct_page(
     }
     plain_tokens = [token for token in page.tokens if token.id not in table_token_ids]
     blocks = [
-        _Block(y=min(token.bbox[1] for token in line), kind="TEXT", text=line_text(line))
-        for line in group_token_lines(plain_tokens, tolerance_ratio=tolerance_ratio)
-        if line_text(line)
+        _Block(y=line.bbox[1], kind="TEXT", text=line.text)
+        for line in reconstruct_bbox_lines(
+            plain_tokens, tolerance_ratio=tolerance_ratio
+        )
+        if line.text
     ]
     warnings: list[str] = []
     structured_tables = 0
