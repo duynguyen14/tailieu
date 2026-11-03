@@ -4,6 +4,7 @@ from app.services.text_reconstruction import (
     ReconstructionTable,
     ReconstructionToken,
     group_token_lines,
+    reconstruct_bbox_lines,
     reconstruct_page,
     reconstruct_table,
 )
@@ -32,6 +33,26 @@ def test_group_token_lines_restores_reading_order() -> None:
         ["Số:", "1089-26/CDNC-LS"],
         ["Ngày gửi:", "15/09/2026"],
     ]
+
+
+def test_reconstruct_bbox_lines_exposes_line_boxes_and_token_membership() -> None:
+    tokens = [
+        token("3", "15/09/2026", (300, 80, 430, 105), 3),
+        token("1", "Số:", (40, 40, 90, 65), 1),
+        token("2", "1089-26/CDNC-LS", (100, 40, 280, 65), 2),
+        token("4", "Ngày gửi:", (180, 80, 290, 105), 4),
+    ]
+
+    lines = reconstruct_bbox_lines(tokens)
+
+    assert [line.text for line in lines] == [
+        "Số: 1089-26/CDNC-LS",
+        "Ngày gửi: 15/09/2026",
+    ]
+    assert lines[0].bbox == (40, 40, 280, 65)
+    assert lines[0].token_ids == ("1", "2")
+    assert lines[1].bbox == (180, 80, 430, 105)
+    assert lines[1].token_ids == ("4", "3")
 
 
 def test_reconstruct_table_uses_reviewed_cells_to_preserve_person_relationships() -> None:

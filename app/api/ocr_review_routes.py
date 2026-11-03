@@ -5,6 +5,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from app.schemas.ocr_review import (
+    OcrBboxTextPreview,
     OcrReviewDetail,
     OcrReviewHistoryResponse,
     OcrReviewQueueResponse,
@@ -81,6 +82,16 @@ def get_ocr_review_history(
         page_type=page_type,
         reviewed_by=reviewed_by,
     )
+
+
+@router.get("/{run_id}/bbox-text-preview", response_model=OcrBboxTextPreview)
+def get_bbox_text_preview(request: Request, run_id: str) -> OcrBboxTextPreview:
+    try:
+        return _service(request).get_bbox_text_preview(run_id)
+    except OcrReviewNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except OcrReviewConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @router.get("/{run_id}", response_model=OcrReviewDetail)

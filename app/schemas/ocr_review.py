@@ -164,3 +164,31 @@ class OcrReviewHistoryResponse(BaseModel):
     page_size: int = Field(ge=1)
     total_items: int = Field(ge=0)
     total_pages: int = Field(ge=0)
+
+
+class OcrBboxTextPreviewToken(BaseModel):
+    token_index: int = Field(ge=1)
+    source_token_id: str | None
+    text: str
+    bbox: BBox
+    line_index: int = Field(ge=1)
+
+
+class OcrBboxTextPreviewLine(BaseModel):
+    line_index: int = Field(ge=1)
+    bbox: BBox
+    text: str
+    token_indexes: list[int]
+
+
+class OcrBboxTextPreview(BaseModel):
+    algorithm_version: str
+    line_tolerance_ratio: float = Field(gt=0)
+    run: OcrReviewRunInfo
+    page: OcrReviewPageInfo
+    image_base64: str
+    tokens: list[OcrBboxTextPreviewToken]
+    lines: list[OcrBboxTextPreviewLine]
+    reconstructed_text: str
+    included_token_count: int = Field(ge=0)
+    ignored_token_count: int = Field(ge=0)

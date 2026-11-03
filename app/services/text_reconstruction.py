@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from statistics import median
-from typing import Literal, Sequence
-
+from typing import Literal
 
 BBox = tuple[int, int, int, int]
 
@@ -81,6 +81,16 @@ class PageReconstructionResult:
         }
 
 
+@dataclass(frozen=True)
+class BboxTextLineResult:
+    """One visual line reconstructed only from reviewed text and bbox geometry."""
+
+    line_index: int
+    bbox: BBox
+    text: str
+    token_ids: tuple[str, ...]
+
+
 @dataclass
 class _Line:
     tokens: list[ReconstructionToken] = field(default_factory=list)
@@ -152,6 +162,31 @@ def line_text(tokens: Sequence[ReconstructionToken]) -> str:
     return " ".join(
         text for token in tokens if (text := normalize_text(token.text))
     )
+
+
+def reconstruct_bbox_lines(
+    tokens: Sequence[ReconstructionToken], *, tolerance_ratio: float = 0.55
+) -> list[BboxTextLineResult]:
+    """Expose bbox-only line grouping for diagnostics and visual review."""
+
+    results: list[BboxTextLineResult] = []
+    for line_index, line_tokens in enumerate(
+        group_token_lines(tokens, tolerance_ratio=tolerance_ratio), start=1
+    ):
+        results.append(
+            BboxTextLineResult(
+                line_index=line_index,
+                bbox=(
+                    min(token.bbox[0] for token in line_tokens),
+                    min(token.bbox[1] for token in line_tokens),
+                    max(token.bbox[2] for token in line_tokens),
+                    max(token.bbox[3] for token in line_tokens),
+                ),
+                text=line_text(line_tokens),
+                token_ids=tuple(token.id for token in line_tokens),
+            )
+        )
+    return results
 
 
 def _center_inside(token: ReconstructionToken, bbox: BBox) -> bool:

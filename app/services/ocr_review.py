@@ -20,6 +20,9 @@ from app.db.models import (
     utc_now,
 )
 from app.schemas.ocr_review import (
+    OcrBboxTextPreview,
+    OcrBboxTextPreviewLine,
+    OcrBboxTextPreviewToken,
     OcrReviewDetail,
     OcrReviewHistoryItem,
     OcrReviewHistoryResponse,
@@ -31,6 +34,7 @@ from app.schemas.ocr_review import (
     OcrReviewTokenView,
 )
 from app.services.storage import AnnotationStorage
+from app.services.text_reconstruction import ReconstructionToken, reconstruct_bbox_lines
 
 
 class OcrReviewNotFoundError(LookupError):
@@ -50,9 +54,16 @@ class OcrReviewPersistenceError(RuntimeError):
 
 
 class OcrReviewService:
-    def __init__(self, *, database: Database, storage: AnnotationStorage) -> None:
+    def __init__(
+        self,
+        *,
+        database: Database,
+        storage: AnnotationStorage,
+        line_tolerance_ratio: float = 0.55,
+    ) -> None:
         self._database = database
         self._storage = storage
+        self._line_tolerance_ratio = line_tolerance_ratio
 
     def get_next_review(
         self,
@@ -147,6 +158,72 @@ class OcrReviewService:
             if run is None:
                 raise OcrReviewNotFoundError("OCR run was not found.")
             return self._detail(session, run)
+
+    def get_bbox_text_preview(self, run_id: str) -> OcrBboxTextPreview:
+        """Build a read-only preview from the active human OCR snapshot only."""
+
+        detail = self.get_detail(run_id)
+        if detail.run.review_id is None:
+            raise OcrReviewConflictError(
+                "BBox text preview requires an active human OCR review."
+            )
+        if detail.run.include_in_llm is not True:
+            raise OcrReviewConflictError(
+                "BBox text preview is unavailable because this OCR page was skipped."
+            )
+
+        included_views = [
+            token for token in detail.tokens if token.include_in_extraction
+        ]
+        reconstruction_tokens = [
+            ReconstructionToken(
+                id=str(token_index),
+                text=token.reviewed_text,
+                bbox=token.reviewed_bbox,
+                order=token_index,
+            )
+            for token_index, token in enumerate(included_views, start=1)
+        ]
+        line_results = reconstruct_bbox_lines(
+            reconstruction_tokens,
+            tolerance_ratio=self._line_tolerance_ratio,
+        )
+        line_by_token_id = {
+            token_id: line.line_index
+            for line in line_results
+            for token_id in line.token_ids
+        }
+        preview_tokens = [
+            OcrBboxTextPreviewToken(
+                token_index=token_index,
+                source_token_id=token.source_token_id,
+                text=token.reviewed_text,
+                bbox=token.reviewed_bbox,
+                line_index=line_by_token_id[str(token_index)],
+            )
+            for token_index, token in enumerate(included_views, start=1)
+        ]
+        preview_lines = [
+            OcrBboxTextPreviewLine(
+                line_index=line.line_index,
+                bbox=line.bbox,
+                text=line.text,
+                token_indexes=[int(token_id) for token_id in line.token_ids],
+            )
+            for line in line_results
+        ]
+        return OcrBboxTextPreview(
+            algorithm_version="bbox-reading-order-v1",
+            line_tolerance_ratio=self._line_tolerance_ratio,
+            run=detail.run,
+            page=detail.page,
+            image_base64=detail.image_base64,
+            tokens=preview_tokens,
+            lines=preview_lines,
+            reconstructed_text="\n".join(line.text for line in line_results),
+            included_token_count=len(included_views),
+            ignored_token_count=len(detail.tokens) - len(included_views),
+        )
 
     def get_history(
         self,

@@ -18,8 +18,8 @@ from app.db.database import Database
 from app.models.factory import build_model_bundle
 from app.services.annotation import AnnotationService
 from app.services.ocr_review import OcrReviewService
-from app.services.pdf_renderer import PdfRenderer
 from app.services.page_label_audit import PageLabelAuditService
+from app.services.pdf_renderer import PdfRenderer
 from app.services.pipeline import DocumentPipeline
 from app.services.storage import AnnotationStorage
 from app.services.table_annotation import TableAnnotationService
@@ -57,6 +57,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ocr_review_service = OcrReviewService(
         database=database,
         storage=annotation_storage,
+        line_tolerance_ratio=settings.text_reconstruction_line_tolerance,
     )
     text_reconstruction_review_service = TextReconstructionReviewService(
         database=database,
