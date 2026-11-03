@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import base64
 import json
 import tempfile
@@ -37,6 +38,7 @@ from app.schemas.table_annotation import (
     TableRegionPayload,
 )
 from tools.run_grounded_ocr import eligible_pages
+from tools.reconstruct_case_text import _select_case_ids
 
 
 def _two_page_pdf() -> bytes:
@@ -167,6 +169,107 @@ def test_text_reconstruction_review_creates_version_and_preserves_unicode() -> N
             assert versions[0].is_active is False
             assert versions[1].is_active is True
             assert versions[1].reconstructed_text == corrected
+
+
+def test_text_reconstruction_tool_selects_ready_pdf_by_filename_or_document() -> None:
+    with _client() as client:
+        unready_document = client.post(
+            "/api/v1/annotation/documents",
+            files={"file": ("unready.pdf", _two_page_pdf(), "application/pdf")},
+        ).json()["document"]
+        ready_document = client.post(
+            "/api/v1/annotation/documents",
+            files={"file": ("ready.pdf", _two_page_pdf(), "application/pdf")},
+        ).json()["document"]
+        unready_case_id = str(uuid4())
+        ready_case_id = str(uuid4())
+        ready_run_id = str(uuid4())
+        with client.app.state.database.session() as session:
+            session.add_all(
+                [
+                    DocumentCase(
+                        id=unready_case_id,
+                        document_id=unready_document["id"],
+                        case_index=1,
+                        status="AUTO_GROUPED",
+                        is_active=True,
+                        start_page_number=1,
+                        end_page_number=1,
+                    ),
+                    DocumentCase(
+                        id=ready_case_id,
+                        document_id=ready_document["id"],
+                        case_index=1,
+                        status="AUTO_GROUPED",
+                        is_active=True,
+                        start_page_number=1,
+                        end_page_number=1,
+                    ),
+                ]
+            )
+            session.flush()
+            session.add_all(
+                [
+                    DocumentCasePage(
+                        id=str(uuid4()),
+                        case_id=unready_case_id,
+                        page_id=unready_document["pages"][0]["id"],
+                        page_order=1,
+                        page_role="NOTE",
+                    ),
+                    DocumentCasePage(
+                        id=str(uuid4()),
+                        case_id=ready_case_id,
+                        page_id=ready_document["pages"][0]["id"],
+                        page_order=1,
+                        page_role="NOTE",
+                    ),
+                    OcrRun(
+                        id=ready_run_id,
+                        page_id=ready_document["pages"][0]["id"],
+                        status="COMPLETED",
+                        is_active=True,
+                        model_name="det+rec",
+                        model_version="test-v1",
+                        device="gpu:0",
+                    ),
+                ]
+            )
+            session.flush()
+            session.add(
+                OcrReview(
+                    id=str(uuid4()),
+                    ocr_run_id=ready_run_id,
+                    status="REVIEWED",
+                    is_active=True,
+                    include_in_llm=True,
+                    reviewed_by="thai",
+                )
+            )
+
+        defaults = {
+            "case_id": None,
+            "document_id": None,
+            "filename": None,
+            "limit": 0,
+            "ready_only": False,
+            "include_incomplete": False,
+        }
+        with client.app.state.database.session() as session:
+            ready_args = argparse.Namespace(
+                **{**defaults, "ready_only": True, "limit": 1}
+            )
+            assert _select_case_ids(session, ready_args) == [ready_case_id]
+
+            filename_args = argparse.Namespace(
+                **{**defaults, "filename": "READY.PDF"}
+            )
+            assert _select_case_ids(session, filename_args) == [ready_case_id]
+
+            document_args = argparse.Namespace(
+                **{**defaults, "document_id": unready_document["id"]}
+            )
+            assert _select_case_ids(session, document_args) == [unready_case_id]
 
 
 def test_cors_wildcard_allows_any_origin_without_cookie_credentials() -> None:

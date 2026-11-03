@@ -6,12 +6,13 @@ import json
 from dataclasses import dataclass
 from uuid import uuid4
 
-from sqlalchemy import select, true
+from sqlalchemy import func, select, true
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.core.config import get_settings
 from app.db.database import Database
 from app.db.models import (
+    AnnotationDocument,
     CaseTextReconstruction,
     DocumentCase,
     DocumentCasePage,
@@ -51,8 +52,31 @@ def parse_args() -> argparse.Namespace:
             "modifying the source OCR tokens."
         )
     )
-    parser.add_argument("--case-id", default=None)
+    selector = parser.add_mutually_exclusive_group()
+    selector.add_argument(
+        "--case-id",
+        default=None,
+        help="Technical case identifier (mainly for debugging).",
+    )
+    selector.add_argument(
+        "--document-id",
+        default=None,
+        help="Reconstruct the active case belonging to this imported PDF ID.",
+    )
+    selector.add_argument(
+        "--filename",
+        default=None,
+        help="Reconstruct active cases whose source PDF filename matches exactly.",
+    )
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument(
+        "--ready-only",
+        action="store_true",
+        help=(
+            "Select only cases whose every case page has an active approved OCR "
+            "review. With --limit, skipped/unready cases do not consume the limit."
+        ),
+    )
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--print-text", action="store_true")
@@ -67,6 +91,65 @@ def parse_args() -> argparse.Namespace:
         help="Use active PREDICTED table structure when no human-reviewed version exists.",
     )
     return parser.parse_args()
+
+
+def _approved_ocr_review_exists():
+    """Correlated predicate for an approved active OCR review of one case page."""
+
+    return (
+        select(OcrReview.id)
+        .join(OcrRun, OcrRun.id == OcrReview.ocr_run_id)
+        .where(
+            OcrRun.page_id == DocumentCasePage.page_id,
+            OcrRun.status == "COMPLETED",
+            OcrRun.is_active == true(),
+            OcrReview.is_active == true(),
+            OcrReview.include_in_llm == true(),
+        )
+        .correlate(DocumentCasePage)
+        .exists()
+    )
+
+
+def _select_case_ids(session, args: argparse.Namespace) -> list[str]:
+    statement = select(DocumentCase.id).where(DocumentCase.is_active == true())
+    if not args.include_incomplete:
+        statement = statement.where(DocumentCase.status != "NEEDS_REVIEW")
+    if args.case_id:
+        statement = statement.where(DocumentCase.id == args.case_id)
+    elif args.document_id:
+        statement = statement.where(DocumentCase.document_id == args.document_id)
+    elif args.filename:
+        normalized_filename = args.filename.strip().lower()
+        if not normalized_filename:
+            raise ValueError("--filename cannot be blank")
+        statement = statement.join(
+            AnnotationDocument,
+            AnnotationDocument.id == DocumentCase.document_id,
+        ).where(func.lower(AnnotationDocument.original_filename) == normalized_filename)
+    if args.ready_only:
+        case_page_exists = (
+            select(DocumentCasePage.id)
+            .where(DocumentCasePage.case_id == DocumentCase.id)
+            .correlate(DocumentCase)
+            .exists()
+        )
+        unready_page_exists = (
+            select(DocumentCasePage.id)
+            .where(
+                DocumentCasePage.case_id == DocumentCase.id,
+                ~_approved_ocr_review_exists(),
+            )
+            .correlate(DocumentCase)
+            .exists()
+        )
+        statement = statement.where(case_page_exists, ~unready_page_exists)
+    statement = statement.order_by(
+        DocumentCase.document_id.asc(), DocumentCase.case_index.asc()
+    )
+    if args.limit:
+        statement = statement.limit(args.limit)
+    return list(session.scalars(statement).all())
 
 
 def _fingerprint(payload: dict) -> str:
@@ -195,20 +278,11 @@ def run(args: argparse.Namespace) -> ReconstructionSummary:
     summary = ReconstructionSummary()
     try:
         with database.session() as session:
-            statement = select(DocumentCase.id).where(DocumentCase.is_active == true())
-            if not args.include_incomplete:
-                statement = statement.where(DocumentCase.status != "NEEDS_REVIEW")
-            if args.case_id:
-                statement = statement.where(DocumentCase.id == args.case_id)
-            statement = statement.order_by(
-                DocumentCase.document_id.asc(), DocumentCase.case_index.asc()
-            )
-            if args.limit:
-                statement = statement.limit(args.limit)
-            case_ids = list(session.scalars(statement).all())
+            case_ids = _select_case_ids(session, args)
         summary.discovered = len(case_ids)
 
         for position, case_id in enumerate(case_ids, start=1):
+            case_filename: str | None = None
             try:
                 with database.session() as session:
                     case = session.scalar(
@@ -224,6 +298,8 @@ def run(args: argparse.Namespace) -> ReconstructionSummary:
                     )
                     if case is None:
                         raise RuntimeError("Document case was not found.")
+                    case_filename = case.document.original_filename
+                    log_context = f"file={case_filename!r} case={case.id}"
                     page_inputs: list[PageReconstructionInput] = []
                     source_pages: list[dict] = []
                     for case_page in case.pages:
@@ -258,7 +334,7 @@ def run(args: argparse.Namespace) -> ReconstructionSummary:
                         and not args.force
                     ):
                         summary.unchanged += 1
-                        print(f"[{position}/{len(case_ids)}] unchanged case={case.id}")
+                        print(f"[{position}/{len(case_ids)}] unchanged {log_context}")
                         continue
 
                     reconstructed_text, page_results = reconstruct_case(
@@ -280,7 +356,7 @@ def run(args: argparse.Namespace) -> ReconstructionSummary:
                     if args.dry_run:
                         summary.created += 1
                         print(
-                            f"[{position}/{len(case_ids)}] DRY-RUN case={case.id} "
+                            f"[{position}/{len(case_ids)}] DRY-RUN {log_context} "
                             f"pages={len(page_results)} chars={len(reconstructed_text)}"
                         )
                         continue
@@ -306,15 +382,23 @@ def run(args: argparse.Namespace) -> ReconstructionSummary:
                     )
                     summary.created += 1
                     print(
-                        f"[{position}/{len(case_ids)}] created case={case.id} "
+                        f"[{position}/{len(case_ids)}] created {log_context} "
                         f"pages={len(page_results)} chars={len(reconstructed_text)}"
                     )
             except CaseNotReadyError as exc:
                 summary.skipped += 1
-                print(f"[{position}/{len(case_ids)}] SKIPPED case={case_id}: {exc}")
+                file_context = f"file={case_filename!r} " if case_filename else ""
+                print(
+                    f"[{position}/{len(case_ids)}] SKIPPED {file_context}"
+                    f"case={case_id}: {exc}"
+                )
             except Exception as exc:
                 summary.failed += 1
-                print(f"[{position}/{len(case_ids)}] FAILED case={case_id}: {exc}")
+                file_context = f"file={case_filename!r} " if case_filename else ""
+                print(
+                    f"[{position}/{len(case_ids)}] FAILED {file_context}"
+                    f"case={case_id}: {exc}"
+                )
         return summary
     finally:
         database.close()
