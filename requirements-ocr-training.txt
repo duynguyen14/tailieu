@@ -4,3 +4,17 @@
 
 PyYAML>=6.0,<7.0
 
+# PaddleOCR source-training dependencies. The pip `paddleocr` runtime package
+# does not install every dependency imported by `tools/train.py`.
+shapely
+scikit-image
+pyclipper
+lmdb
+tqdm
+rapidfuzz
+cython
+requests
+albumentations
+albucore
+packaging
+
