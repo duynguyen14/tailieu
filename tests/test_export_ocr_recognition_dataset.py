@@ -1,9 +1,24 @@
+import sys
+
 from tools.export_ocr_recognition_dataset import (
     _recommended_max_text_length,
     normalize_text,
+    parse_args,
     padded_crop_box,
     split_document_ids,
 )
+
+
+def test_parse_args_accepts_dry_run(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["export_ocr_recognition_dataset", "--dry-run"],
+    )
+
+    args = parse_args()
+
+    assert args.dry_run is True
 
 
 def test_normalize_text_keeps_visible_unicode_and_removes_line_breaks() -> None:

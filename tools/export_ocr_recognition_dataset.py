@@ -113,6 +113,14 @@ def parse_args() -> argparse.Namespace:
             "must not exist."
         ),
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Validate DB rows, source images, reviewed text and bbox crops, then "
+            "print statistics without creating a dataset directory."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -329,6 +337,7 @@ def export_dataset(
     *,
     output_dir: Path,
     config: OcrRecognitionDatasetSettings,
+    dry_run: bool = False,
 ) -> dict[str, object]:
     app_settings = get_settings()
     expected_database = config.ocr_rec_dataset_source_database.strip()
@@ -340,13 +349,14 @@ def export_dataset(
         )
 
     output_dir = output_dir.resolve()
-    if output_dir.exists() and not output_dir.is_dir():
-        raise RuntimeError(f"Export path exists but is not a directory: {output_dir}")
-    if output_dir.exists() and any(output_dir.iterdir()):
-        raise RuntimeError(
-            f"Export directory is not empty: {output_dir}. "
-            "Use a new versioned directory to preserve existing datasets."
-        )
+    if not dry_run:
+        if output_dir.exists() and not output_dir.is_dir():
+            raise RuntimeError(f"Export path exists but is not a directory: {output_dir}")
+        if output_dir.exists() and any(output_dir.iterdir()):
+            raise RuntimeError(
+                f"Export directory is not empty: {output_dir}. "
+                "Use a new versioned directory to preserve existing datasets."
+            )
 
     database = Database(app_settings)
     try:
@@ -363,14 +373,16 @@ def export_dataset(
         seed=config.ocr_rec_dataset_split_seed,
     )
     storage_root = app_settings.annotation_storage_path.resolve()
-    output_dir.parent.mkdir(parents=True, exist_ok=True)
-    if output_dir.exists():
-        output_dir.rmdir()  # The directory was verified empty above.
-    staging = Path(
-        tempfile.mkdtemp(
-            prefix=f".{output_dir.name}-staging-", dir=str(output_dir.parent)
+    staging: Path | None = None
+    if not dry_run:
+        output_dir.parent.mkdir(parents=True, exist_ok=True)
+        if output_dir.exists():
+            output_dir.rmdir()  # The directory was verified empty above.
+        staging = Path(
+            tempfile.mkdtemp(
+                prefix=f".{output_dir.name}-staging-", dir=str(output_dir.parent)
+            )
         )
-    )
 
     invalid_items: list[str] = []
     exported: list[ExportToken] = []
@@ -459,9 +471,10 @@ def export_dataset(
                         f"{record.review_id}_t{record.token_order:04d}.png"
                     )
                     relative_crop_path = Path("crops") / split / filename
-                    destination = staging / relative_crop_path
-                    destination.parent.mkdir(parents=True, exist_ok=True)
-                    destination.write_bytes(crop_bytes)
+                    if staging is not None:
+                        destination = staging / relative_crop_path
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        destination.write_bytes(crop_bytes)
 
                     source_bbox = (
                         record.source_x1,
@@ -529,21 +542,23 @@ def export_dataset(
                 item.token_order,
             )
         )
-        write_manifest(staging / "manifest.csv", exported)
-        for split in ("train", "val", "test"):
-            split_records = [record for record in exported if record.split == split]
-            write_manifest(staging / f"{split}.csv", split_records)
-            write_paddle_labels(staging / f"{split}.txt", split_records)
+        if staging is not None:
+            write_manifest(staging / "manifest.csv", exported)
+            for split in ("train", "val", "test"):
+                split_records = [record for record in exported if record.split == split]
+                write_manifest(staging / f"{split}.csv", split_records)
+                write_paddle_labels(staging / f"{split}.txt", split_records)
 
         characters = Counter(character for item in exported for character in item.text)
         character_inventory = [
             {"character": character, "codepoint": ord(character), "count": count}
             for character, count in sorted(characters.items(), key=lambda item: ord(item[0]))
         ]
-        (staging / "character_inventory.json").write_text(
-            json.dumps(character_inventory, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        if staging is not None:
+            (staging / "character_inventory.json").write_text(
+                json.dumps(character_inventory, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
 
         by_split = Counter(record.split for record in exported)
         documents_by_split: dict[str, set[str]] = defaultdict(set)
@@ -557,6 +572,7 @@ def export_dataset(
         lengths = [len(record.text) for record in exported]
         statistics: dict[str, object] = {
             "created_at": datetime.now(UTC).isoformat(),
+            "dry_run": dry_run,
             "source_database": app_settings.db_name,
             "dataset_version": config.ocr_rec_dataset_version,
             "source_review_tokens": len(source_tokens),
@@ -595,14 +611,16 @@ def export_dataset(
                 "deduplicate": config.ocr_rec_dataset_deduplicate,
             },
         }
-        (staging / "dataset_statistics.json").write_text(
-            json.dumps(statistics, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        staging.replace(output_dir)
+        if staging is not None:
+            (staging / "dataset_statistics.json").write_text(
+                json.dumps(statistics, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            staging.replace(output_dir)
         return statistics
     except Exception:
-        shutil.rmtree(staging, ignore_errors=True)
+        if staging is not None:
+            shutil.rmtree(staging, ignore_errors=True)
         raise
 
 
@@ -618,12 +636,23 @@ def main() -> None:
 
         resolved_output = (PROJECT_ROOT / args.output_dir).resolve()
 
-    statistics = export_dataset(output_dir=resolved_output, config=config)
-    print(
-        "Exported "
-        f"{statistics['exported_unique_crops']} approved OCR recognition crops "
-        f"to {resolved_output}"
+    statistics = export_dataset(
+        output_dir=resolved_output,
+        config=config,
+        dry_run=args.dry_run,
     )
+    if args.dry_run:
+        print(
+            "DRY RUN validated "
+            f"{statistics['exported_unique_crops']} approved OCR recognition crops. "
+            "No dataset files were written."
+        )
+    else:
+        print(
+            "Exported "
+            f"{statistics['exported_unique_crops']} approved OCR recognition crops "
+            f"to {resolved_output}"
+        )
     print(f"Split counts: {statistics['counts_by_split']}")
     print(
         "Corrected text / added / bbox-edited: "
