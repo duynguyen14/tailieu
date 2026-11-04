@@ -10,6 +10,7 @@ from app.api.ocr_review_routes import router as ocr_review_router
 from app.api.page_label_audit_routes import router as page_label_audit_router
 from app.api.routes import router
 from app.api.table_annotation_routes import router as table_annotation_router
+from app.api.teacher_extraction_routes import router as teacher_extraction_router
 from app.api.text_reconstruction_routes import router as text_reconstruction_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
@@ -23,6 +24,7 @@ from app.services.pdf_renderer import PdfRenderer
 from app.services.pipeline import DocumentPipeline
 from app.services.storage import AnnotationStorage
 from app.services.table_annotation import TableAnnotationService
+from app.services.teacher_extraction_review import TeacherExtractionReviewService
 from app.services.text_reconstruction_review import TextReconstructionReviewService
 
 
@@ -62,6 +64,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     text_reconstruction_review_service = TextReconstructionReviewService(
         database=database,
         storage=annotation_storage,
+    )
+    teacher_extraction_review_service = TeacherExtractionReviewService(
+        database=database,
     )
 
     @asynccontextmanager
@@ -104,12 +109,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.page_label_audit_service = page_label_audit_service
     app.state.ocr_review_service = ocr_review_service
     app.state.text_reconstruction_review_service = text_reconstruction_review_service
+    app.state.teacher_extraction_review_service = teacher_extraction_review_service
     app.include_router(router, prefix=settings.api_prefix)
     app.include_router(annotation_router, prefix=settings.api_prefix)
     app.include_router(page_label_audit_router, prefix=settings.api_prefix)
     app.include_router(ocr_review_router, prefix=settings.api_prefix)
     app.include_router(table_annotation_router, prefix=settings.api_prefix)
     app.include_router(text_reconstruction_router, prefix=settings.api_prefix)
+    app.include_router(teacher_extraction_router, prefix=settings.api_prefix)
     return app
 
 

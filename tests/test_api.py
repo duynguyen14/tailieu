@@ -29,6 +29,9 @@ from app.db.models import (
     OcrToken,
     PageLabelAudit,
     TableAnnotation,
+    TeacherExtractionAttempt,
+    TeacherExtractionJob,
+    TeacherExtractionReview,
     utc_now,
 )
 from app.main import create_app
@@ -169,6 +172,167 @@ def test_text_reconstruction_review_creates_version_and_preserves_unicode() -> N
             assert versions[0].is_active is False
             assert versions[1].is_active is True
             assert versions[1].reconstructed_text == corrected
+
+
+def test_teacher_extraction_review_versions_json_and_updates_queue() -> None:
+    with _client() as client:
+        imported = client.post(
+            "/api/v1/annotation/documents",
+            files={"file": ("teacher.pdf", _two_page_pdf(), "application/pdf")},
+        ).json()["document"]
+        case_id = str(uuid4())
+        reconstruction_id = str(uuid4())
+        job_id = str(uuid4())
+        attempt_id = str(uuid4())
+        review_id = str(uuid4())
+        output = {
+            "schema_version": "compact-document-v1",
+            "case_id": case_id,
+            "document_id": imported["id"],
+            "note": {"note_number": "850-2026"},
+            "applicants": [],
+            "warnings": [],
+        }
+        with client.app.state.database.session() as session:
+            session.add(
+                DocumentCase(
+                    id=case_id,
+                    document_id=imported["id"],
+                    case_index=1,
+                    status="AUTO_GROUPED",
+                    is_active=True,
+                    start_page_number=1,
+                    end_page_number=2,
+                )
+            )
+            session.flush()
+            session.add(
+                CaseTextReconstruction(
+                    id=reconstruction_id,
+                    case_id=case_id,
+                    algorithm_version="test-v1",
+                    source_fingerprint="b" * 64,
+                    status="REVIEWED",
+                    is_active=True,
+                    reconstructed_text="No: 850-2026",
+                    structure_json=json.dumps({"pages": []}),
+                    page_count=1,
+                    token_count=2,
+                )
+            )
+            session.flush()
+            session.add(
+                TeacherExtractionJob(
+                    id=job_id,
+                    reconstruction_id=reconstruction_id,
+                    case_id=case_id,
+                    document_id=imported["id"],
+                    input_hash="c" * 64,
+                    input_text="No: 850-2026",
+                    source_structure_json=json.dumps({"pages": []}),
+                    reconstruction_version="test-v1",
+                    schema_version="compact-document-v1",
+                    prompt_version="teacher-v1",
+                    teacher_model="teacher-model",
+                    teacher_endpoint="http://teacher/v1/chat/completions",
+                    status="COMPLETED",
+                    is_active=True,
+                    attempt_count=1,
+                    completed_at=utc_now(),
+                )
+            )
+            session.flush()
+            session.add(
+                TeacherExtractionAttempt(
+                    id=attempt_id,
+                    job_id=job_id,
+                    attempt_number=1,
+                    request_json=json.dumps({"model": "teacher-model"}),
+                    raw_response_json=json.dumps({"choices": []}),
+                    assistant_content=json.dumps(output),
+                    parsed_output_json=json.dumps(output),
+                    validation_status="VALID",
+                    http_status=200,
+                    latency_ms=1200,
+                    prompt_tokens=100,
+                    completion_tokens=50,
+                    total_tokens=150,
+                    finish_reason="stop",
+                )
+            )
+            session.flush()
+            session.add(
+                TeacherExtractionReview(
+                    id=review_id,
+                    job_id=job_id,
+                    source_attempt_id=attempt_id,
+                    reviewed_output_json=json.dumps(output),
+                    review_status="PENDING",
+                    is_active=True,
+                )
+            )
+
+        queued = client.get("/api/v1/teacher-extraction/review/next")
+        assert queued.status_code == 200
+        queued_payload = queued.json()
+        assert queued_payload["stats"] == {
+            "pending": 1,
+            "approved": 0,
+            "rejected": 0,
+            "total": 1,
+        }
+        assert queued_payload["current"]["review"]["id"] == review_id
+        assert queued_payload["current"]["case"]["original_filename"] == "teacher.pdf"
+        assert queued_payload["current"]["attempt"]["latency_ms"] == 1200
+
+        edited_output = {**output, "note": {"note_number": "850-2026-A"}}
+        saved = client.put(
+            f"/api/v1/teacher-extraction/{review_id}/review",
+            json={
+                "reviewed_by": "thai",
+                "decision": "PENDING",
+                "reviewed_output": edited_output,
+                "review_note": "đã sửa số công hàm",
+            },
+        )
+        assert saved.status_code == 200
+        saved_payload = saved.json()
+        saved_id = saved_payload["review"]["id"]
+        assert saved_id != review_id
+        assert saved_payload["review"]["parent_review_id"] == review_id
+        assert saved_payload["reviewed_output"]["note"]["note_number"] == "850-2026-A"
+
+        approved = client.put(
+            f"/api/v1/teacher-extraction/{saved_id}/review",
+            json={
+                "reviewed_by": "thai",
+                "decision": "APPROVED",
+                "reviewed_output": edited_output,
+                "review_note": "đã kiểm tra",
+            },
+        )
+        assert approved.status_code == 200
+        assert approved.json()["review"]["review_status"] == "APPROVED"
+
+        empty_queue = client.get("/api/v1/teacher-extraction/review/next").json()
+        assert empty_queue["current"] is None
+        assert empty_queue["stats"] == {
+            "pending": 0,
+            "approved": 1,
+            "rejected": 0,
+            "total": 1,
+        }
+
+        with client.app.state.database.session() as session:
+            versions = list(
+                session.scalars(
+                    select(TeacherExtractionReview)
+                    .where(TeacherExtractionReview.job_id == job_id)
+                    .order_by(TeacherExtractionReview.created_at.asc())
+                ).all()
+            )
+            assert len(versions) == 3
+            assert [version.is_active for version in versions] == [False, False, True]
 
 
 def test_text_reconstruction_tool_selects_ready_pdf_by_filename_or_document() -> None:

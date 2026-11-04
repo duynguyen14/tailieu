@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Literal
+from datetime import datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -73,3 +74,84 @@ class CompactDocumentExtraction(BaseModel):
                 f"invalid={invalid_links}"
             )
         return self
+
+
+TeacherReviewDecision = Literal["PENDING", "APPROVED", "REJECTED"]
+
+
+class TeacherExtractionReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reviewed_by: str = Field(min_length=1, max_length=100)
+    decision: TeacherReviewDecision
+    reviewed_output: dict[str, Any]
+    review_note: str | None = Field(default=None, max_length=4000)
+
+
+class TeacherExtractionReviewInfo(BaseModel):
+    id: str
+    parent_review_id: str | None
+    review_status: TeacherReviewDecision
+    is_active: bool
+    reviewed_by: str | None
+    review_note: str | None
+    reviewed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class TeacherExtractionJobInfo(BaseModel):
+    id: str
+    reconstruction_id: str
+    input_hash: str
+    schema_version: str
+    prompt_version: str
+    teacher_model: str
+    teacher_endpoint: str
+    status: str
+    attempt_count: int = Field(ge=0)
+    completed_at: datetime | None
+    created_at: datetime
+
+
+class TeacherExtractionAttemptInfo(BaseModel):
+    id: str
+    attempt_number: int = Field(ge=1)
+    validation_status: str
+    http_status: int | None
+    latency_ms: int | None
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
+    finish_reason: str | None
+    error_message: str | None
+    created_at: datetime
+
+
+class TeacherExtractionCaseInfo(BaseModel):
+    case_id: str
+    document_id: str
+    original_filename: str
+
+
+class TeacherExtractionReviewDetail(BaseModel):
+    review: TeacherExtractionReviewInfo
+    job: TeacherExtractionJobInfo
+    attempt: TeacherExtractionAttemptInfo
+    case: TeacherExtractionCaseInfo
+    input_text: str
+    reviewed_output: dict[str, Any]
+    raw_response: dict[str, Any] | list[Any] | str | None
+    validation_errors: dict[str, Any] | list[Any] | str | None
+
+
+class TeacherExtractionReviewStats(BaseModel):
+    pending: int = Field(ge=0)
+    approved: int = Field(ge=0)
+    rejected: int = Field(ge=0)
+    total: int = Field(ge=0)
+
+
+class TeacherExtractionReviewQueueResponse(BaseModel):
+    current: TeacherExtractionReviewDetail | None
+    stats: TeacherExtractionReviewStats
