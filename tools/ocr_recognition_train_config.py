@@ -51,6 +51,7 @@ class OcrRecognitionTrainSettings(BaseSettings):
     ocr_train_auto_download_pretrained: bool = True
     ocr_train_bootstrap_repo: bool = False
     ocr_train_export_after_train: bool = True
+    ocr_train_extend_character_dictionary: bool = True
     ocr_train_fail_on_unknown_characters: bool = True
     ocr_train_checkpoint: Path | None = None
 

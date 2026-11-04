@@ -209,14 +209,43 @@ def normalize_checkpoint_prefix(path: Path) -> Path:
     return path
 
 
-def load_character_dictionary(path: Path) -> set[str]:
+def load_character_dictionary_entries(path: Path) -> list[str]:
     if not path.is_file():
         raise RuntimeError(f"PaddleOCR character dictionary was not found: {path}")
-    return {
+    entries = [
         line.rstrip("\r\n")
         for line in path.read_text(encoding="utf-8-sig").splitlines()
         if line.rstrip("\r\n")
-    }
+    ]
+    if len(entries) != len(set(entries)):
+        raise RuntimeError(f"PaddleOCR character dictionary has duplicates: {path}")
+    return entries
+
+
+def load_character_dictionary(path: Path) -> set[str]:
+    return set(load_character_dictionary_entries(path))
+
+
+def build_extended_character_dictionary(
+    base_dictionary_path: Path,
+    dataset_characters: frozenset[str],
+    output_path: Path,
+) -> list[str]:
+    """Append dataset-only characters while preserving every pretrained index."""
+
+    entries = load_character_dictionary_entries(base_dictionary_path)
+    existing = set(entries)
+    added = sorted(
+        character
+        for character in dataset_characters
+        if character != " " and character not in existing
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        "".join(f"{character}\n" for character in [*entries, *added]),
+        encoding="utf-8",
+    )
+    return added
 
 
 def validate_characters(
@@ -386,12 +415,41 @@ def run(args: argparse.Namespace) -> None:
     base_config_path = repository / settings.ocr_train_config_relative_path
     if not base_config_path.is_file():
         raise RuntimeError(f"Official PaddleOCR config was not found: {base_config_path}")
-    character_dict_path = repository / "ppocr" / "utils" / "dict" / "ppocrv5_latin_dict.txt"
+    base_character_dict_path = (
+        repository / "ppocr" / "utils" / "dict" / "ppocrv5_latin_dict.txt"
+    )
     unknown = validate_characters(
         dataset.characters,
-        character_dict_path,
-        fail_on_unknown=settings.ocr_train_fail_on_unknown_characters,
+        base_character_dict_path,
+        fail_on_unknown=False,
     )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    character_dict_path = output_dir / "character_dict.generated.txt"
+    if unknown and not settings.ocr_train_extend_character_dictionary:
+        if settings.ocr_train_fail_on_unknown_characters:
+            preview = " ".join(
+                f"U+{ord(character):04X}={character!r}" for character in unknown[:30]
+            )
+            raise RuntimeError(
+                "Dataset contains characters absent from ppocrv5_latin_dict.txt: "
+                f"{preview}. Enable OCR_TRAIN_EXTEND_CHARACTER_DICTIONARY or "
+                "provide labels covered by the base dictionary."
+            )
+        character_dict_path = base_character_dict_path
+        added_characters: list[str] = []
+    else:
+        added_characters = build_extended_character_dictionary(
+            base_character_dict_path,
+            dataset.characters,
+            character_dict_path,
+        )
+        if added_characters:
+            print(
+                "Extended Latin dictionary with "
+                f"{len(added_characters)} dataset character(s): "
+                + " ".join(added_characters)
+            )
 
     pretrained_path = settings.pretrained_path
     if not pretrained_path.is_file():
@@ -413,7 +471,6 @@ def run(args: argparse.Namespace) -> None:
             "Use a new output version or pass --checkpoint to resume."
         )
 
-    output_dir.mkdir(parents=True, exist_ok=True)
     max_text_length = max(
         settings.ocr_train_max_text_length,
         dataset.recommended_max_text_length,
@@ -464,6 +521,8 @@ def run(args: argparse.Namespace) -> None:
             "test": dataset.test_count,
         },
         "unknown_characters": unknown,
+        "added_characters": added_characters,
+        "character_dictionary": str(character_dict_path),
         "checkpoint": str(checkpoint_prefix) if checkpoint_prefix else None,
         "train_command": train_command,
     }

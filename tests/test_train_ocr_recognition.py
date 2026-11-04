@@ -4,6 +4,7 @@ from pathlib import Path
 
 from tools.train_ocr_recognition import (
     DatasetInfo,
+    build_extended_character_dictionary,
     build_training_config,
     normalize_checkpoint_prefix,
 )
@@ -96,4 +97,28 @@ def test_normalize_checkpoint_prefix_accepts_pdparams_path(tmp_path) -> None:
     checkpoint.write_bytes(b"weights")
 
     assert normalize_checkpoint_prefix(checkpoint) == tmp_path / "latest"
+
+
+def test_extended_dictionary_preserves_base_order_and_appends_vietnamese(
+    tmp_path,
+) -> None:
+    base = tmp_path / "base.txt"
+    generated = tmp_path / "output" / "character_dict.generated.txt"
+    base.write_text("A\na\nĐ\n", encoding="utf-8")
+
+    added = build_extended_character_dictionary(
+        base,
+        frozenset("A Đặng"),
+        generated,
+    )
+
+    assert added == ["g", "n", "ặ"]
+    assert generated.read_text(encoding="utf-8").splitlines() == [
+        "A",
+        "a",
+        "Đ",
+        "g",
+        "n",
+        "ặ",
+    ]
 
