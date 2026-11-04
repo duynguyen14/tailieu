@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from sqlalchemy import select, true, update
 
-from app.core.config import DevicePreference, get_settings
+from app.core.config import DevicePreference, OcrEngineKind, get_settings
 from app.db.database import Database
 from app.db.models import (
     AnnotationPage,
@@ -43,6 +43,7 @@ from app.models.paddle_orientation import (
     OrientationPrediction,
     PaddleOrientationClassifier,
 )
+from app.models.tesseract_ocr_engine import TesseractOcrEngine
 from app.schemas.annotation import ReviewStatus
 from app.services.storage import AnnotationStorage
 
@@ -88,12 +89,10 @@ def _write_candidate(path: Path, prepared: PreparedOcrImage) -> None:
 
 
 def effective_preprocess_version(settings) -> str:
-    if not settings.ocr_enable_selective_refinement:
-        return settings.ocr_preprocess_version
-    return (
-        f"{settings.ocr_preprocess_version}"
-        f"|refinement={settings.ocr_refinement_version}"
-    )
+    version = f"{settings.ocr_preprocess_version}|engine={settings.ocr_engine.value}"
+    if settings.ocr_enable_selective_refinement:
+        version += f"|refinement={settings.ocr_refinement_version}"
+    return version
 
 
 def parse_args() -> argparse.Namespace:
@@ -324,15 +323,31 @@ def run(args: argparse.Namespace) -> OcrSummary:
             return summary
 
         device = DevicePreference(args.device) if args.device else None
-        engine = PaddleOcrEngine(settings, device_override=device)
+        if settings.ocr_engine == OcrEngineKind.TESSERACT:
+            engine = TesseractOcrEngine(settings)
+        else:
+            engine = PaddleOcrEngine(settings, device_override=device)
+        use_paddle_aux_models = (
+            settings.ocr_engine == OcrEngineKind.PADDLE
+            or settings.tesseract_use_paddle_aux_models
+        )
+        auxiliary_device = (
+            engine.effective_device
+            if settings.ocr_engine == OcrEngineKind.PADDLE
+            else (
+                f"gpu:{settings.ocr_runtime_gpu_device_id}"
+                if settings.ocr_runtime_device == DevicePreference.CUDA
+                else settings.ocr_runtime_device.value
+            )
+        )
         orientation_classifier = (
-            PaddleOrientationClassifier(settings, device=engine.effective_device)
-            if settings.ocr_enable_orientation
+            PaddleOrientationClassifier(settings, device=auxiliary_device)
+            if settings.ocr_enable_orientation and use_paddle_aux_models
             else None
         )
         layout_detector = (
-            PaddleLayoutDetector(settings, device=engine.effective_device)
-            if settings.ocr_enable_exclusion_detection
+            PaddleLayoutDetector(settings, device=auxiliary_device)
+            if settings.ocr_enable_exclusion_detection and use_paddle_aux_models
             else None
         )
         orientation_model_name = (
@@ -361,7 +376,11 @@ def run(args: argparse.Namespace) -> OcrSummary:
                     f"|layout={layout_model_name}"
                     f"|refinement={refinement_model_name}"
                 ),
-                model_version=settings.ocr_model_version,
+                model_version=(
+                    settings.tesseract_model_version
+                    if settings.ocr_engine == OcrEngineKind.TESSERACT
+                    else settings.ocr_model_version
+                ),
                 device=engine.effective_device,
             )
             processed_relative_path: str | None = None
@@ -382,7 +401,14 @@ def run(args: argparse.Namespace) -> OcrSummary:
                     orientation_classifier.predict_image(probe_image)
                     if orientation_classifier
                     else OrientationPrediction(
-                        angle=0, confidence=1.0, predicted_angle=0
+                        angle=0,
+                        confidence=(
+                            0.0
+                            if settings.ocr_engine == OcrEngineKind.TESSERACT
+                            and settings.tesseract_try_all_orientations
+                            else 1.0
+                        ),
+                        predicted_angle=0,
                     )
                 )
                 probe_image.close()
@@ -391,7 +417,13 @@ def run(args: argparse.Namespace) -> OcrSummary:
                     min_confidence=settings.ocr_orientation_min_confidence,
                     fallback_all_angles=(
                         settings.ocr_orientation_fallback_all_angles
-                        and orientation_classifier is not None
+                        and (
+                            orientation_classifier is not None
+                            or (
+                                settings.ocr_engine == OcrEngineKind.TESSERACT
+                                and settings.tesseract_try_all_orientations
+                            )
+                        )
                     ),
                 )
                 prepare_kwargs = {
@@ -470,6 +502,11 @@ def run(args: argparse.Namespace) -> OcrSummary:
                     final_path = temp_root / "selected-final.png"
                     _write_candidate(final_path, selected.prepared)
                     tokens = selected.tokens
+                    table_metadata: dict[str, object] = {"enabled": False}
+                    if settings.ocr_engine == OcrEngineKind.TESSERACT:
+                        table_result = engine.enhance_tables(final_path, tokens)
+                        tokens = table_result.tokens
+                        table_metadata = table_result.metadata
                     refinement_metadata: dict[str, object] = {
                         "enabled": False,
                         "version": settings.ocr_refinement_version,
@@ -483,7 +520,7 @@ def run(args: argparse.Namespace) -> OcrSummary:
                             selected.prepared.image,
                             tokens,
                             temp_dir=temp_root / "refinement",
-                            predict_many=engine.predict_many,
+                            predict_many=engine.predict_refinement_many,
                             scales=settings.ocr_refinement_scale_list,
                             confidence_threshold=(
                                 settings.ocr_refinement_confidence_threshold
@@ -542,6 +579,7 @@ def run(args: argparse.Namespace) -> OcrSummary:
                             "candidate_scores": candidate_scores,
                             "selected_quality_score": round(selected.score, 6),
                             "upscale_attempted": round(upscale_attempted, 6),
+                            "table_cell_ocr": table_metadata,
                             "selective_refinement": refinement_metadata,
                         }
                     )

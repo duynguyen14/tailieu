@@ -183,6 +183,66 @@ Paddle stores official OCR weights in its model cache. Qwen is stored under
 
 ## 7. Run a small OCR batch
 
+### Chọn OCR engine
+
+Mặc định hệ thống vẫn dùng PaddleOCR như trước:
+
+```env
+OCR_ENGINE=paddle
+```
+
+Để dùng pipeline Tesseract được port trực tiếp vào Python backend (không gọi
+ScanManager và không mở thêm service), cài riêng nhóm phụ thuộc:
+
+```cmd
+python -m pip install -r requirements-ocr-tesseract.txt
+```
+
+Tesseract là chương trình native nên `pip` không cài được chính engine. Trên
+Windows Server cần cài Tesseract 5 và chuẩn bị các file model:
+
+```text
+C:\Program Files\Tesseract-OCR\tesseract.exe
+C:\Program Files\Tesseract-OCR\tessdata\vie.traineddata
+C:\Program Files\Tesseract-OCR\tessdata\eng.traineddata
+C:\Program Files\Tesseract-OCR\tessdata\deu.traineddata
+C:\Program Files\Tesseract-OCR\tessdata\fra.traineddata
+C:\Program Files\Tesseract-OCR\tessdata_best\vie.traineddata
+```
+
+Sau đó cấu hình:
+
+```env
+OCR_ENGINE=tesseract
+TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
+TESSERACT_FAST_DATA_DIR=C:\Program Files\Tesseract-OCR\tessdata
+TESSERACT_BEST_DATA_DIR=C:\Program Files\Tesseract-OCR\tessdata_best
+TESSERACT_LANGUAGES=vie+eng+deu+fra
+TESSERACT_ENABLE_VIE_REFINEMENT=true
+TESSERACT_ENABLE_TABLE_CELLS=true
+TESSERACT_TRY_ALL_ORIENTATIONS=true
+```
+
+Backend Python thực hiện toàn bộ orchestration, chuẩn hóa ảnh, thử chiều xoay,
+phát hiện ô bảng bằng OpenCV, đọc lại vùng tiếng Việt bằng `tessdata_best` và
+ghi token/bbox vào đúng các bảng OCR hiện có. Tesseract chạy CPU; tham số
+`--device cuda` không làm Tesseract chuyển sang GPU. Nếu bật
+`TESSERACT_USE_PADDLE_AUX_MODELS=true`, riêng model orientation/layout phụ trợ
+có thể chạy theo `OCR_RUNTIME_DEVICE`, còn nhận dạng chữ vẫn là Tesseract CPU.
+
+Nên thử hai trang trước khi chạy hàng loạt:
+
+```cmd
+python -m tools.run_grounded_ocr --limit 2 --pending-review-only
+```
+
+Pipeline Tesseract ưu tiên độ chính xác để tạo dữ liệu: khi không dùng model
+orientation phụ trợ, nó có thể OCR thử cả bốn chiều; các vùng yếu còn được đọc
+lại bằng model tiếng Việt tốt hơn. Vì `pytesseract` tạo tiến trình native cho
+mỗi lượt đọc, tốc độ sẽ không bằng ScanManager giữ Tesseract engine nóng trong
+cùng process. Chỉ dùng chế độ này cho batch làm sạch dữ liệu sau khi benchmark
+trên server; production vẫn có thể giữ `OCR_ENGINE=paddle`.
+
 ```cmd
 python -m tools.run_grounded_ocr --limit 10 --device auto
 ```

@@ -1,0 +1,7 @@
+# CPU OCR backend matching the Tesseract/tessdata strategy used by ScanManager.
+# Tesseract 5 itself is a native Windows installation and is configured via ENV.
+-r requirements.txt
+Pillow>=11.0,<13.0
+numpy>=1.26,<3.0
+opencv-python>=4.10,<5.1
+pytesseract>=0.3.13,<0.4

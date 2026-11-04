@@ -24,6 +24,11 @@ class DevicePreference(StrEnum):
     AUTO = "auto"
 
 
+class OcrEngineKind(StrEnum):
+    PADDLE = "paddle"
+    TESSERACT = "tesseract"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
@@ -100,6 +105,7 @@ class Settings(BaseSettings):
     # GPU-only OCR used to create grounded LLM inputs. PaddleOCR returns text,
     # confidence and source boxes; the LLM must cite token IDs instead of
     # generating coordinates itself.
+    ocr_engine: OcrEngineKind = OcrEngineKind.PADDLE
     ocr_runtime_device: DevicePreference = DevicePreference.CUDA
     ocr_runtime_gpu_device_id: int = Field(default=0, ge=0)
     ocr_runtime_allow_cpu_fallback: bool = False
@@ -150,6 +156,29 @@ class Settings(BaseSettings):
     ocr_refinement_padding_ratio: float = Field(default=0.12, ge=0.0, le=0.75)
     ocr_refinement_max_crop_side: int = Field(default=2400, ge=320, le=8000)
     ocr_refinement_protect_digits: bool = True
+
+    # Optional CPU Tesseract backend. Python owns orchestration and SQL writes;
+    # pytesseract only invokes the local Tesseract 5 executable.
+    tesseract_cmd: Path = Path("C:/Program Files/Tesseract-OCR/tesseract.exe")
+    tesseract_model_version: str = "tesseract5-fast4.1-vie-best4.1-v1"
+    tesseract_fast_data_dir: Path = Path("C:/Program Files/Tesseract-OCR/tessdata")
+    tesseract_best_data_dir: Path = Path(
+        "C:/Program Files/Tesseract-OCR/tessdata_best"
+    )
+    tesseract_languages: str = "vie+eng+deu+fra"
+    tesseract_oem: int = Field(default=1, ge=0, le=3)
+    tesseract_page_segmentation_mode: int = Field(default=3, ge=0, le=13)
+    tesseract_refinement_page_segmentation_mode: int = Field(
+        default=7, ge=0, le=13
+    )
+    tesseract_timeout_seconds: float = Field(default=90.0, ge=1.0, le=600.0)
+    tesseract_threads: int = Field(default=2, ge=1, le=32)
+    tesseract_enable_vie_refinement: bool = True
+    tesseract_enable_table_cells: bool = True
+    tesseract_table_max_cells: int = Field(default=80, ge=0, le=500)
+    tesseract_table_budget_seconds: float = Field(default=20.0, ge=0.1, le=300.0)
+    tesseract_use_paddle_aux_models: bool = False
+    tesseract_try_all_orientations: bool = True
     paddle_pdx_model_source: str = "BOS"
     paddle_pdx_disable_model_source_check: bool = True
 
@@ -270,6 +299,26 @@ class Settings(BaseSettings):
         return values
 
     @property
+    def tesseract_language_list(self) -> list[str]:
+        return [
+            item.strip().lower()
+            for item in self.tesseract_languages.split("+")
+            if item.strip()
+        ]
+
+    @property
+    def tesseract_cmd_path(self) -> Path:
+        return self.resolve_project_path(self.tesseract_cmd)
+
+    @property
+    def tesseract_fast_data_path(self) -> Path:
+        return self.resolve_project_path(self.tesseract_fast_data_dir)
+
+    @property
+    def tesseract_best_data_path(self) -> Path:
+        return self.resolve_project_path(self.tesseract_best_data_dir)
+
+    @property
     def llm_base_model_path(self) -> Path:
         path = self.llm_base_model_dir
         return path.resolve() if path.is_absolute() else (PROJECT_ROOT / path).resolve()
@@ -326,6 +375,12 @@ class Settings(BaseSettings):
     def resolve_optional_project_path(path: Path | None) -> Path | None:
         if path is None:
             return None
+        if path.is_absolute():
+            return path.resolve()
+        return (PROJECT_ROOT / path).resolve()
+
+    @staticmethod
+    def resolve_project_path(path: Path) -> Path:
         if path.is_absolute():
             return path.resolve()
         return (PROJECT_ROOT / path).resolve()

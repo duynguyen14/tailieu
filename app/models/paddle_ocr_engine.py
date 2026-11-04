@@ -223,6 +223,11 @@ class PaddleOcrEngine:
             )
         return results
 
+    def predict_refinement_many(
+        self, image_paths: list[Path]
+    ) -> list[list[OcrTokenPrediction]]:
+        return self.predict_many(image_paths)
+
     def _resolve_device(self, requested: DevicePreference) -> str:
         try:
             import paddle
