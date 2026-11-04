@@ -37,6 +37,13 @@ class CompactApplicant(BaseModel):
     gender: str | None = None
     nationality: str | None = None
     passport_number: str | None = None
+    passport_type: str | None = Field(
+        default=None,
+        description=(
+            "Passport type explicitly associated with this applicant, for example "
+            "Ordinary, Diplomatic, Official or Service."
+        ),
+    )
     passport_issue_date: str | None = Field(
         default=None,
         description=(
@@ -118,7 +125,10 @@ class CompactDocumentExtraction(BaseModel):
                 applicant.related_to_person_id
                 for applicant in self.applicants
                 if applicant.related_to_person_id is not None
-                and applicant.related_to_person_id not in known
+                and (
+                    applicant.related_to_person_id not in known
+                    or applicant.related_to_person_id == applicant.person_id
+                )
             }
         )
         if invalid_links:

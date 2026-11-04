@@ -344,7 +344,16 @@ def export_dataset(
     for split in ("train", "val", "test"):
         write_csv(output_dir / f"{split}.csv", [item for item in exported if item.split == split])
 
-    labels = [label.value for label in AnnotationLabel]
+    # Only export classes that are actually present in this reviewed dataset.
+    # AnnotationLabel is the full application taxonomy and may contain retired
+    # or not-yet-collected classes. Including those empty classes makes the
+    # trainer fail because the training split cannot contain samples for them.
+    present_labels = {item.label for item in exported}
+    labels = [
+        label.value
+        for label in AnnotationLabel
+        if label.value in present_labels
+    ]
     (output_dir / "labels.json").write_text(
         json.dumps(
             {

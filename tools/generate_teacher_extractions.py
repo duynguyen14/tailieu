@@ -47,12 +47,16 @@ exit_date is only an explicit intended/proposed departure or exit date from Viet
 passport_expiration is only the applicant's passport expiry date.
 passport_issue_date is only the issue date of that applicant's passport.
 passport_issuing_authority is only the explicit passport issuer/authority/place.
+passport_type is only an explicit passport type such as Ordinary, Diplomatic,
+Official or Service; otherwise return null.
 proposed_place_of_visa_collection is only an explicit visa collection location;
 never copy a port of entry, airport or border gate into it unless the source
 explicitly states that the visa will be collected there.
 port_of_entry is only an explicitly stated arrival airport, border gate or port;
 never use a visa collection location as port_of_entry.
 Assign stable person IDs person_1, person_2, ... in source reading order.
+related_to_person_id must be null unless it references an existing, different
+person_id in the same response. Never invent a missing related person.
 Return exactly one JSON object matching the supplied schema and no commentary."""
 
 
@@ -198,10 +202,47 @@ def extract_json_object(content: str) -> dict[str, Any]:
     return value
 
 
+def sanitize_person_links(raw: dict[str, Any]) -> dict[str, Any]:
+    """Drop dangling/self person links without inventing a replacement relation."""
+    applicants = raw.get("applicants")
+    if not isinstance(applicants, list):
+        return raw
+
+    known_person_ids = {
+        applicant.get("person_id")
+        for applicant in applicants
+        if isinstance(applicant, dict)
+        and isinstance(applicant.get("person_id"), str)
+        and applicant["person_id"].strip()
+    }
+    repair_warnings: list[str] = []
+    for applicant in applicants:
+        if not isinstance(applicant, dict):
+            continue
+        related_id = applicant.get("related_to_person_id")
+        if related_id is None:
+            continue
+        person_id = applicant.get("person_id")
+        if related_id not in known_person_ids or related_id == person_id:
+            applicant["related_to_person_id"] = None
+            repair_warnings.append(
+                "Dropped invalid related_to_person_id "
+                f"{related_id!r} for {person_id!r}; human review required."
+            )
+
+    if repair_warnings:
+        warnings = raw.get("warnings")
+        if warnings is None:
+            raw["warnings"] = repair_warnings
+        elif isinstance(warnings, list):
+            warnings.extend(repair_warnings)
+    return raw
+
+
 def validate_teacher_output(
     content: str, *, candidate: ReconstructionCandidate
 ) -> str:
-    raw = extract_json_object(content)
+    raw = sanitize_person_links(extract_json_object(content))
     target = CompactDocumentExtraction.model_validate(raw)
     if target.case_id != candidate.case_id:
         raise ValueError(
@@ -400,12 +441,15 @@ def call_teacher(candidate: ReconstructionCandidate, settings) -> TeacherCallRes
         validation_status = (
             "INVALID" if isinstance(exc, ValidationError) else "PARSE_ERROR"
         )
-        validation_errors_json = canonical_json(
-            exc.errors() if isinstance(exc, ValidationError) else [{"message": str(exc)}]
+        validation_errors = (
+            exc.errors(include_url=False, include_context=False)
+            if isinstance(exc, ValidationError)
+            else [{"message": str(exc)}]
         )
+        validation_errors_json = canonical_json(validation_errors)
         error_message = str(exc)
 
-    usage = response_payload.get("usage") or {}
+    usage = response_payload.get("usage") or {} if isinstance(response_payload, dict) else {}
     if not isinstance(usage, dict):
         usage = {}
     finish_reason = None

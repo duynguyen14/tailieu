@@ -81,6 +81,7 @@ def test_validate_teacher_output_checks_source_identifiers() -> None:
     result = validate_teacher_output(json.dumps(valid_payload()), candidate=candidate())
     assert '"note_number":"850-2026"' in result
     assert '"passport_expiration":null' in result
+    assert '"passport_type":null' in result
     assert '"proposed_place_of_visa_collection":null' in result
     assert '"passport_issue_date":null' in result
     assert '"passport_issuing_authority":null' in result
@@ -90,6 +91,29 @@ def test_validate_teacher_output_checks_source_identifiers() -> None:
     mismatched["case_id"] = "wrong-case"
     with pytest.raises(ValueError, match="case_id mismatch"):
         validate_teacher_output(json.dumps(mismatched), candidate=candidate())
+
+
+def test_validate_teacher_output_accepts_passport_type() -> None:
+    payload = valid_payload()
+    payload["applicants"][0]["passport_type"] = "Ordinary"
+
+    result = json.loads(
+        validate_teacher_output(json.dumps(payload), candidate=candidate())
+    )
+
+    assert result["applicants"][0]["passport_type"] == "Ordinary"
+
+
+def test_validate_teacher_output_drops_dangling_person_link_with_warning() -> None:
+    payload = valid_payload()
+    payload["applicants"][0]["related_to_person_id"] = "person_3"
+
+    result = json.loads(
+        validate_teacher_output(json.dumps(payload), candidate=candidate())
+    )
+
+    assert result["applicants"][0]["related_to_person_id"] is None
+    assert "Dropped invalid related_to_person_id" in result["warnings"][0]
 
 
 def test_teacher_input_hash_is_deterministic_and_versioned() -> None:
@@ -157,3 +181,42 @@ def test_call_teacher_validates_openai_compatible_response(monkeypatch) -> None:
     assert result.finish_reason == "stop"
     assert captured["url"] == "http://teacher.local/v1/chat/completions"
     assert captured["payload"]["response_format"] == {"type": "json_object"}
+
+
+def test_call_teacher_serializes_validation_errors_without_crashing(monkeypatch) -> None:
+    invalid_payload = valid_payload()
+    invalid_payload["applicants"][0]["unexpected_field"] = "invalid"
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {"content": json.dumps(invalid_payload)},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {},
+            }
+
+    monkeypatch.setattr(
+        "tools.generate_teacher_extractions.httpx.post",
+        lambda *args, **kwargs: FakeResponse(),
+    )
+    runtime_settings = settings(
+        teacher_temperature=0.0,
+        teacher_max_tokens=2048,
+        teacher_use_json_mode=True,
+        teacher_api_key=None,
+        teacher_timeout_seconds=300.0,
+    )
+
+    result = call_teacher(candidate(), runtime_settings)
+
+    assert result.validation_status == "INVALID"
+    assert result.valid is False
+    errors = json.loads(result.validation_errors_json)
+    assert errors[0]["type"] == "extra_forbidden"
