@@ -217,8 +217,6 @@ def load_character_dictionary_entries(path: Path) -> list[str]:
         for line in path.read_text(encoding="utf-8-sig").splitlines()
         if line.rstrip("\r\n")
     ]
-    if len(entries) != len(set(entries)):
-        raise RuntimeError(f"PaddleOCR character dictionary has duplicates: {path}")
     return entries
 
 

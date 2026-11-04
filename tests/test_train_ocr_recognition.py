@@ -122,3 +122,23 @@ def test_extended_dictionary_preserves_base_order_and_appends_vietnamese(
         "ặ",
     ]
 
+
+def test_extended_dictionary_preserves_official_duplicate_entries(tmp_path) -> None:
+    base = tmp_path / "base.txt"
+    generated = tmp_path / "character_dict.generated.txt"
+    base.write_text("A\nA\na\n", encoding="utf-8")
+
+    added = build_extended_character_dictionary(
+        base,
+        frozenset("Aạ"),
+        generated,
+    )
+
+    assert added == ["ạ"]
+    assert generated.read_text(encoding="utf-8").splitlines() == [
+        "A",
+        "A",
+        "a",
+        "ạ",
+    ]
+
