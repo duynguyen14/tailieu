@@ -8,15 +8,13 @@ import json
 import math
 import random
 import re
-import shutil
-import tempfile
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from PIL import Image
-from sqlalchemy import select, true
+from sqlalchemy import and_, func, or_, select, true
 from sqlalchemy.orm import aliased
 
 from app.core.config import get_settings
@@ -34,6 +32,8 @@ from tools.ocr_recognition_dataset_config import OcrRecognitionDatasetSettings
 
 @dataclass(frozen=True)
 class SourceToken:
+    row_id: str
+    row_created_at: datetime
     document_id: str
     page_id: str
     page_number: int
@@ -121,6 +121,17 @@ def parse_args() -> argparse.Namespace:
             "print statistics without creating a dataset directory."
         ),
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1000,
+        help="Number of reviewed OCR tokens fetched and processed per DB batch.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume an interrupted non-dry-run export from its checkpoint.",
+    )
     return parser.parse_args()
 
 
@@ -194,11 +205,80 @@ def padded_crop_box(
     )
 
 
-def load_source_tokens(database: Database) -> list[SourceToken]:
+def _within_snapshot(created_at, row_id, snapshot_created_at: datetime, snapshot_row_id: str):
+    return or_(
+        created_at < snapshot_created_at,
+        and_(created_at == snapshot_created_at, row_id <= snapshot_row_id),
+    )
+
+
+def load_snapshot_cursor(database: Database) -> tuple[datetime, str] | None:
+    with database.session() as session:
+        row = session.execute(
+            select(OcrReviewToken.created_at, OcrReviewToken.id)
+            .join(OcrReview, OcrReview.id == OcrReviewToken.review_id)
+            .join(OcrRun, OcrRun.id == OcrReview.ocr_run_id)
+            .where(
+                OcrRun.status == "COMPLETED",
+                OcrReview.status == "REVIEWED",
+                OcrReview.is_active == true(),
+                OcrReview.include_in_llm == true(),
+                OcrReviewToken.include_in_extraction == true(),
+            )
+            .order_by(OcrReviewToken.created_at.desc(), OcrReviewToken.id.desc())
+            .limit(1)
+        ).first()
+    return (row[0], row[1]) if row is not None else None
+
+
+def load_document_ids(
+    database: Database,
+    *,
+    snapshot_created_at: datetime,
+    snapshot_row_id: str,
+) -> list[str]:
+    with database.session() as session:
+        return list(
+            session.scalars(
+                select(AnnotationDocument.id)
+                .join(AnnotationPage, AnnotationPage.document_id == AnnotationDocument.id)
+                .join(OcrRun, OcrRun.page_id == AnnotationPage.id)
+                .join(OcrReview, OcrReview.ocr_run_id == OcrRun.id)
+                .join(OcrReviewToken, OcrReviewToken.review_id == OcrReview.id)
+                .where(
+                    OcrRun.status == "COMPLETED",
+                    OcrReview.status == "REVIEWED",
+                    OcrReview.is_active == true(),
+                    OcrReview.include_in_llm == true(),
+                    OcrReviewToken.include_in_extraction == true(),
+                    _within_snapshot(
+                        OcrReviewToken.created_at,
+                        OcrReviewToken.id,
+                        snapshot_created_at,
+                        snapshot_row_id,
+                    ),
+                )
+                .distinct()
+                .order_by(AnnotationDocument.id.asc())
+            ).all()
+        )
+
+
+def load_source_token_batch(
+    database: Database,
+    *,
+    after_created_at: datetime | None,
+    after_row_id: str | None,
+    snapshot_created_at: datetime,
+    snapshot_row_id: str,
+    batch_size: int,
+) -> list[SourceToken]:
     source = aliased(OcrToken)
     with database.session() as session:
-        rows = session.execute(
+        statement = (
             select(
+                OcrReviewToken.id,
+                OcrReviewToken.created_at,
                 AnnotationDocument.id,
                 AnnotationPage.id,
                 AnnotationPage.page_number,
@@ -239,17 +319,33 @@ def load_source_tokens(database: Database) -> list[SourceToken]:
                 OcrReview.is_active == true(),
                 OcrReview.include_in_llm == true(),
                 OcrReviewToken.include_in_extraction == true(),
+                _within_snapshot(
+                    OcrReviewToken.created_at,
+                    OcrReviewToken.id,
+                    snapshot_created_at,
+                    snapshot_row_id,
+                ),
             )
-            .order_by(
-                AnnotationDocument.id.asc(),
-                AnnotationPage.page_number.asc(),
-                OcrReviewToken.token_order.asc(),
+            .order_by(OcrReviewToken.created_at.asc(), OcrReviewToken.id.asc())
+            .limit(batch_size)
+        )
+        if after_created_at is not None and after_row_id is not None:
+            statement = statement.where(
+                or_(
+                    OcrReviewToken.created_at > after_created_at,
+                    and_(
+                        OcrReviewToken.created_at == after_created_at,
+                        OcrReviewToken.id > after_row_id,
+                    ),
+                )
             )
-        ).all()
+        rows = session.execute(statement).all()
 
     records: list[SourceToken] = []
     for row in rows:
         (
+            row_id,
+            row_created_at,
             document_id,
             page_id,
             page_number,
@@ -281,6 +377,8 @@ def load_source_tokens(database: Database) -> list[SourceToken]:
         ) = row
         records.append(
             SourceToken(
+                row_id=row_id,
+                row_created_at=row_created_at,
                 document_id=document_id,
                 page_id=page_id,
                 page_number=page_number,
@@ -333,12 +431,245 @@ def _recommended_max_text_length(max_length: int) -> int:
     return max(32, math.ceil((max_length + 16) / 16) * 16)
 
 
+def _checkpoint_signature(config: OcrRecognitionDatasetSettings, database_name: str) -> dict:
+    return {
+        "source_database": database_name,
+        "dataset_version": config.ocr_rec_dataset_version,
+        "split_seed": config.ocr_rec_dataset_split_seed,
+        "train_ratio": config.ocr_rec_dataset_train_ratio,
+        "val_ratio": config.ocr_rec_dataset_val_ratio,
+        "test_ratio": config.ocr_rec_dataset_test_ratio,
+        "padding_ratio": config.ocr_rec_dataset_padding_ratio,
+        "deduplicate": config.ocr_rec_dataset_deduplicate,
+    }
+
+
+def _write_checkpoint(path: Path, state: dict) -> None:
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
+def _load_export_records(path: Path) -> list[ExportToken]:
+    if not path.is_file():
+        return []
+    unique: dict[tuple[str, int], ExportToken] = {}
+    with path.open("r", encoding="utf-8") as source:
+        for line_number, line in enumerate(source, start=1):
+            if not line.strip():
+                continue
+            try:
+                record = ExportToken(**json.loads(line))
+            except (TypeError, json.JSONDecodeError) as error:
+                raise RuntimeError(
+                    f"Invalid export checkpoint record at line {line_number}: {error}"
+                ) from error
+            unique[(record.review_id, record.token_order)] = record
+    records = list(unique.values())
+    if len(records) != sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line):
+        with path.open("w", encoding="utf-8", newline="\n") as target:
+            for record in records:
+                target.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
+    return records
+
+
+def _count_source_tokens(
+    database: Database,
+    *,
+    snapshot_created_at: datetime,
+    snapshot_row_id: str,
+) -> int:
+    with database.session() as session:
+        return int(
+            session.scalar(
+                select(func.count(OcrReviewToken.id))
+                .join(OcrReview, OcrReview.id == OcrReviewToken.review_id)
+                .join(OcrRun, OcrRun.id == OcrReview.ocr_run_id)
+                .where(
+                    OcrRun.status == "COMPLETED",
+                    OcrReview.status == "REVIEWED",
+                    OcrReview.is_active == true(),
+                    OcrReview.include_in_llm == true(),
+                    OcrReviewToken.include_in_extraction == true(),
+                    _within_snapshot(
+                        OcrReviewToken.created_at,
+                        OcrReviewToken.id,
+                        snapshot_created_at,
+                        snapshot_row_id,
+                    ),
+                )
+            )
+            or 0
+        )
+
+
+def _process_source_batch(
+    source_tokens: list[SourceToken],
+    *,
+    storage_root: Path,
+    staging: Path | None,
+    split_by_document: dict[str, str],
+    padding_ratio: float,
+    deduplicate: bool,
+    seen_crop_hashes: dict[str, tuple[str, str]],
+    processed_keys: set[tuple[str, int]],
+) -> tuple[list[ExportToken], list[str], int]:
+    invalid_items: list[str] = []
+    exported: list[ExportToken] = []
+    duplicate_count = 0
+    grouped: dict[str, list[SourceToken]] = defaultdict(list)
+    for record in source_tokens:
+        if (record.review_id, record.token_order) not in processed_keys:
+            grouped[record.image_relative_path].append(record)
+
+    for relative_path in sorted(grouped):
+        image_path = (storage_root / relative_path).resolve()
+        if not image_path.is_relative_to(storage_root):
+            invalid_items.append(f"Image path escapes storage: {relative_path}")
+            continue
+        if not image_path.is_file():
+            invalid_items.append(f"Image is missing: {relative_path}")
+            continue
+        try:
+            with Image.open(image_path) as opened:
+                image = opened.convert("RGB")
+        except OSError as error:
+            invalid_items.append(f"Cannot open {relative_path}: {error}")
+            continue
+
+        try:
+            expected_sizes = {
+                (record.expected_width, record.expected_height)
+                for record in grouped[relative_path]
+            }
+            if len(expected_sizes) != 1 or (image.width, image.height) not in expected_sizes:
+                invalid_items.append(
+                    f"Image size mismatch for {relative_path}: actual "
+                    f"{image.width}x{image.height}, expected {sorted(expected_sizes)}"
+                )
+                continue
+            for record in grouped[relative_path]:
+                text = normalize_text(record.reviewed_text)
+                if not text:
+                    invalid_items.append(
+                        f"{record.review_id}/{record.token_order}: empty reviewed text"
+                    )
+                    continue
+                try:
+                    crop_box = padded_crop_box(
+                        (record.x1, record.y1, record.x2, record.y2),
+                        image_width=image.width,
+                        image_height=image.height,
+                        padding_ratio=padding_ratio,
+                    )
+                except ValueError as error:
+                    invalid_items.append(
+                        f"{record.review_id}/{record.token_order}: {error}"
+                    )
+                    continue
+
+                crop = image.crop(crop_box)
+                buffer = io.BytesIO()
+                crop.save(buffer, format="PNG")
+                crop_bytes = buffer.getvalue()
+                crop_hash = hashlib.sha256(crop_bytes).hexdigest()
+                previous = seen_crop_hashes.get(crop_hash)
+                if deduplicate and previous:
+                    previous_text, previous_source = previous
+                    if previous_text != text:
+                        invalid_items.append(
+                            "Conflicting labels for identical crop: "
+                            f"{previous_source}={previous_text!r}, "
+                            f"{record.review_id}/{record.token_order}={text!r}"
+                        )
+                    else:
+                        duplicate_count += 1
+                    crop.close()
+                    continue
+
+                seen_crop_hashes[crop_hash] = (
+                    text,
+                    f"{record.review_id}/{record.token_order}",
+                )
+                split = split_by_document[record.document_id]
+                filename = (
+                    f"{record.document_id}_p{record.page_number:04d}_"
+                    f"{record.review_id}_t{record.token_order:04d}.png"
+                )
+                relative_crop_path = Path("crops") / split / filename
+                if staging is not None:
+                    destination = staging / relative_crop_path
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.write_bytes(crop_bytes)
+
+                source_bbox = (
+                    record.source_x1,
+                    record.source_y1,
+                    record.source_x2,
+                    record.source_y2,
+                )
+                reviewed_bbox = (record.x1, record.y1, record.x2, record.y2)
+                exported.append(
+                    ExportToken(
+                        image_path=relative_crop_path.as_posix(),
+                        text=text,
+                        split=split,
+                        document_id=record.document_id,
+                        page_id=record.page_id,
+                        page_number=record.page_number,
+                        original_filename=record.original_filename,
+                        review_id=record.review_id,
+                        token_order=record.token_order,
+                        source_token_id=record.source_token_id,
+                        model_name=record.model_name,
+                        model_version=record.model_version,
+                        reviewed_by=record.reviewed_by,
+                        reviewed_at=record.reviewed_at,
+                        bbox_x1=record.x1,
+                        bbox_y1=record.y1,
+                        bbox_x2=record.x2,
+                        bbox_y2=record.y2,
+                        crop_x1=crop_box[0],
+                        crop_y1=crop_box[1],
+                        crop_x2=crop_box[2],
+                        crop_y2=crop_box[3],
+                        crop_width=crop.width,
+                        crop_height=crop.height,
+                        source_confidence=record.source_confidence,
+                        is_text_corrected=(
+                            record.source_text is not None
+                            and text != normalize_text(record.source_text)
+                        ),
+                        is_bbox_corrected=(
+                            record.source_token_id is not None
+                            and source_bbox != reviewed_bbox
+                        ),
+                        is_manually_added=record.source_token_id is None,
+                        sha256=crop_hash,
+                    )
+                )
+                crop.close()
+        finally:
+            image.close()
+    return exported, invalid_items, duplicate_count
+
+
 def export_dataset(
     *,
     output_dir: Path,
     config: OcrRecognitionDatasetSettings,
     dry_run: bool = False,
+    batch_size: int = 1000,
+    resume: bool = False,
 ) -> dict[str, object]:
+    if batch_size < 1:
+        raise ValueError("--batch-size must be at least 1")
+    if dry_run and resume:
+        raise ValueError("--resume cannot be combined with --dry-run")
+
     app_settings = get_settings()
     expected_database = config.ocr_rec_dataset_source_database.strip()
     if app_settings.db_name.lower() != expected_database.lower():
@@ -349,182 +680,176 @@ def export_dataset(
         )
 
     output_dir = output_dir.resolve()
-    if not dry_run:
-        if output_dir.exists() and not output_dir.is_dir():
-            raise RuntimeError(f"Export path exists but is not a directory: {output_dir}")
-        if output_dir.exists() and any(output_dir.iterdir()):
-            raise RuntimeError(
-                f"Export directory is not empty: {output_dir}. "
-                "Use a new versioned directory to preserve existing datasets."
-            )
-
+    work_dir = output_dir.parent / f".{output_dir.name}.ocr-export-work"
+    checkpoint_path = work_dir / "checkpoint.json"
+    records_path = work_dir / "records.jsonl"
+    signature = _checkpoint_signature(config, app_settings.db_name)
     database = Database(app_settings)
     try:
-        source_tokens = load_source_tokens(database)
-    finally:
-        database.close()
-    if not source_tokens:
-        raise RuntimeError("No active approved OCR review tokens were found.")
-
-    split_by_document = split_document_ids(
-        [record.document_id for record in source_tokens],
-        val_ratio=config.ocr_rec_dataset_val_ratio,
-        test_ratio=config.ocr_rec_dataset_test_ratio,
-        seed=config.ocr_rec_dataset_split_seed,
-    )
-    storage_root = app_settings.annotation_storage_path.resolve()
-    staging: Path | None = None
-    if not dry_run:
-        output_dir.parent.mkdir(parents=True, exist_ok=True)
-        if output_dir.exists():
-            output_dir.rmdir()  # The directory was verified empty above.
-        staging = Path(
-            tempfile.mkdtemp(
-                prefix=f".{output_dir.name}-staging-", dir=str(output_dir.parent)
+        if resume:
+            if not work_dir.is_dir() or not checkpoint_path.is_file():
+                raise RuntimeError(
+                    f"No resumable OCR export checkpoint exists for {output_dir}."
+                )
+            state = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            if state.get("signature") != signature:
+                raise RuntimeError(
+                    "Export checkpoint configuration differs from the current ENV. "
+                    "Restore the original configuration or start a new output version."
+                )
+            snapshot_created_at = datetime.fromisoformat(state["snapshot_created_at"])
+            snapshot_row_id = state["snapshot_row_id"]
+            last_created_at = (
+                datetime.fromisoformat(state["last_created_at"])
+                if state.get("last_created_at")
+                else None
             )
+            last_row_id = state.get("last_row_id")
+            split_by_document = state["split_by_document"]
+            duplicate_count = int(state.get("duplicate_count", 0))
+            invalid_items = list(state.get("invalid_items", []))
+            exported = _load_export_records(records_path)
+            print(
+                f"Resuming OCR export after {state.get('processed_source_tokens', 0)} "
+                f"source tokens; existing crops={len(exported)}"
+            )
+        else:
+            if not dry_run:
+                if output_dir.exists() and not output_dir.is_dir():
+                    raise RuntimeError(
+                        f"Export path exists but is not a directory: {output_dir}"
+                    )
+                if output_dir.exists() and any(output_dir.iterdir()):
+                    raise RuntimeError(
+                        f"Export directory is not empty: {output_dir}. "
+                        "Use a new versioned directory to preserve existing datasets."
+                    )
+                if work_dir.exists():
+                    raise RuntimeError(
+                        f"Interrupted export checkpoint already exists: {work_dir}. "
+                        "Use --resume or choose a new --output-dir."
+                    )
+            snapshot = load_snapshot_cursor(database)
+            if snapshot is None:
+                raise RuntimeError("No active approved OCR review tokens were found.")
+            snapshot_created_at, snapshot_row_id = snapshot
+            document_ids = load_document_ids(
+                database,
+                snapshot_created_at=snapshot_created_at,
+                snapshot_row_id=snapshot_row_id,
+            )
+            split_by_document = split_document_ids(
+                document_ids,
+                val_ratio=config.ocr_rec_dataset_val_ratio,
+                test_ratio=config.ocr_rec_dataset_test_ratio,
+                seed=config.ocr_rec_dataset_split_seed,
+            )
+            last_created_at = None
+            last_row_id = None
+            duplicate_count = 0
+            invalid_items: list[str] = []
+            exported: list[ExportToken] = []
+            if not dry_run:
+                output_dir.parent.mkdir(parents=True, exist_ok=True)
+                if output_dir.exists():
+                    output_dir.rmdir()
+                work_dir.mkdir(parents=True)
+
+        source_review_tokens = _count_source_tokens(
+            database,
+            snapshot_created_at=snapshot_created_at,
+            snapshot_row_id=snapshot_row_id,
         )
+        storage_root = app_settings.annotation_storage_path.resolve()
+        staging = None if dry_run else work_dir
+        seen_crop_hashes = {
+            record.sha256: (
+                record.text,
+                f"{record.review_id}/{record.token_order}",
+            )
+            for record in exported
+        }
+        processed_keys = {
+            (record.review_id, record.token_order) for record in exported
+        }
+        processed_source_tokens = int(
+            state.get("processed_source_tokens", 0) if resume else 0
+        )
+        batch_number = 0
 
-    invalid_items: list[str] = []
-    exported: list[ExportToken] = []
-    seen_crop_hashes: dict[str, tuple[str, str]] = {}
-    duplicate_count = 0
+        if staging is not None and not resume:
+            _write_checkpoint(
+                checkpoint_path,
+                {
+                    "signature": signature,
+                    "snapshot_created_at": snapshot_created_at.isoformat(),
+                    "snapshot_row_id": snapshot_row_id,
+                    "last_created_at": None,
+                    "last_row_id": None,
+                    "processed_source_tokens": 0,
+                    "duplicate_count": 0,
+                    "invalid_items": [],
+                    "split_by_document": split_by_document,
+                },
+            )
 
-    try:
-        grouped: dict[str, list[SourceToken]] = defaultdict(list)
-        for record in source_tokens:
-            grouped[record.image_relative_path].append(record)
+        while True:
+            source_batch = load_source_token_batch(
+                database,
+                after_created_at=last_created_at,
+                after_row_id=last_row_id,
+                snapshot_created_at=snapshot_created_at,
+                snapshot_row_id=snapshot_row_id,
+                batch_size=batch_size,
+            )
+            if not source_batch:
+                break
+            batch_number += 1
+            batch_exported, batch_invalid, batch_duplicates = _process_source_batch(
+                source_batch,
+                storage_root=storage_root,
+                staging=staging,
+                split_by_document=split_by_document,
+                padding_ratio=config.ocr_rec_dataset_padding_ratio,
+                deduplicate=config.ocr_rec_dataset_deduplicate,
+                seen_crop_hashes=seen_crop_hashes,
+                processed_keys=processed_keys,
+            )
+            exported.extend(batch_exported)
+            processed_keys.update(
+                (record.review_id, record.token_order) for record in batch_exported
+            )
+            invalid_items.extend(batch_invalid)
+            duplicate_count += batch_duplicates
+            processed_source_tokens += len(source_batch)
+            last_created_at = source_batch[-1].row_created_at
+            last_row_id = source_batch[-1].row_id
 
-        for relative_path in sorted(grouped):
-            image_path = (storage_root / relative_path).resolve()
-            if not image_path.is_relative_to(storage_root):
-                invalid_items.append(f"Image path escapes storage: {relative_path}")
-                continue
-            if not image_path.is_file():
-                invalid_items.append(f"Image is missing: {relative_path}")
-                continue
-
-            try:
-                with Image.open(image_path) as opened:
-                    image = opened.convert("RGB")
-            except OSError as error:
-                invalid_items.append(f"Cannot open {relative_path}: {error}")
-                continue
-
-            try:
-                expected_sizes = {
-                    (record.expected_width, record.expected_height)
-                    for record in grouped[relative_path]
-                }
-                if len(expected_sizes) != 1 or (image.width, image.height) not in expected_sizes:
-                    invalid_items.append(
-                        f"Image size mismatch for {relative_path}: actual "
-                        f"{image.width}x{image.height}, expected "
-                        f"{sorted(expected_sizes)}"
-                    )
-                    continue
-                for record in grouped[relative_path]:
-                    text = normalize_text(record.reviewed_text)
-                    if not text:
-                        invalid_items.append(
-                            f"{record.review_id}/{record.token_order}: empty reviewed text"
-                        )
-                        continue
-                    try:
-                        crop_box = padded_crop_box(
-                            (record.x1, record.y1, record.x2, record.y2),
-                            image_width=image.width,
-                            image_height=image.height,
-                            padding_ratio=config.ocr_rec_dataset_padding_ratio,
-                        )
-                    except ValueError as error:
-                        invalid_items.append(
-                            f"{record.review_id}/{record.token_order}: {error}"
-                        )
-                        continue
-
-                    crop = image.crop(crop_box)
-                    buffer = io.BytesIO()
-                    crop.save(buffer, format="PNG")
-                    crop_bytes = buffer.getvalue()
-                    crop_hash = hashlib.sha256(crop_bytes).hexdigest()
-                    previous = seen_crop_hashes.get(crop_hash)
-                    if config.ocr_rec_dataset_deduplicate and previous:
-                        previous_text, previous_source = previous
-                        if previous_text != text:
-                            invalid_items.append(
-                                "Conflicting labels for identical crop: "
-                                f"{previous_source}={previous_text!r}, "
-                                f"{record.review_id}/{record.token_order}={text!r}"
-                            )
-                        else:
-                            duplicate_count += 1
-                        crop.close()
-                        continue
-
-                    seen_crop_hashes[crop_hash] = (
-                        text,
-                        f"{record.review_id}/{record.token_order}",
-                    )
-                    split = split_by_document[record.document_id]
-                    filename = (
-                        f"{record.document_id}_p{record.page_number:04d}_"
-                        f"{record.review_id}_t{record.token_order:04d}.png"
-                    )
-                    relative_crop_path = Path("crops") / split / filename
-                    if staging is not None:
-                        destination = staging / relative_crop_path
-                        destination.parent.mkdir(parents=True, exist_ok=True)
-                        destination.write_bytes(crop_bytes)
-
-                    source_bbox = (
-                        record.source_x1,
-                        record.source_y1,
-                        record.source_x2,
-                        record.source_y2,
-                    )
-                    reviewed_bbox = (record.x1, record.y1, record.x2, record.y2)
-                    exported.append(
-                        ExportToken(
-                            image_path=relative_crop_path.as_posix(),
-                            text=text,
-                            split=split,
-                            document_id=record.document_id,
-                            page_id=record.page_id,
-                            page_number=record.page_number,
-                            original_filename=record.original_filename,
-                            review_id=record.review_id,
-                            token_order=record.token_order,
-                            source_token_id=record.source_token_id,
-                            model_name=record.model_name,
-                            model_version=record.model_version,
-                            reviewed_by=record.reviewed_by,
-                            reviewed_at=record.reviewed_at,
-                            bbox_x1=record.x1,
-                            bbox_y1=record.y1,
-                            bbox_x2=record.x2,
-                            bbox_y2=record.y2,
-                            crop_x1=crop_box[0],
-                            crop_y1=crop_box[1],
-                            crop_x2=crop_box[2],
-                            crop_y2=crop_box[3],
-                            crop_width=crop.width,
-                            crop_height=crop.height,
-                            source_confidence=record.source_confidence,
-                            is_text_corrected=(
-                                record.source_text is not None
-                                and text != normalize_text(record.source_text)
-                            ),
-                            is_bbox_corrected=(
-                                record.source_token_id is not None
-                                and source_bbox != reviewed_bbox
-                            ),
-                            is_manually_added=record.source_token_id is None,
-                            sha256=crop_hash,
-                        )
-                    )
-                    crop.close()
-            finally:
-                image.close()
+            if staging is not None:
+                with records_path.open("a", encoding="utf-8", newline="\n") as target:
+                    for record in batch_exported:
+                        target.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
+                _write_checkpoint(
+                    checkpoint_path,
+                    {
+                        "signature": signature,
+                        "snapshot_created_at": snapshot_created_at.isoformat(),
+                        "snapshot_row_id": snapshot_row_id,
+                        "last_created_at": last_created_at.isoformat(),
+                        "last_row_id": last_row_id,
+                        "processed_source_tokens": processed_source_tokens,
+                        "duplicate_count": duplicate_count,
+                        "invalid_items": invalid_items,
+                        "split_by_document": split_by_document,
+                    },
+                )
+            print(
+                f"Batch {batch_number:04d}: fetched={len(source_batch)}, "
+                f"crops={len(batch_exported)}, duplicates={batch_duplicates}, "
+                f"invalid={len(batch_invalid)}, progress="
+                f"{min(processed_source_tokens, source_review_tokens)}/"
+                f"{source_review_tokens}"
+            )
 
         if invalid_items and config.ocr_rec_dataset_fail_on_invalid:
             preview = "\n".join(f"- {item}" for item in invalid_items[:30])
@@ -575,7 +900,7 @@ def export_dataset(
             "dry_run": dry_run,
             "source_database": app_settings.db_name,
             "dataset_version": config.ocr_rec_dataset_version,
-            "source_review_tokens": len(source_tokens),
+            "source_review_tokens": source_review_tokens,
             "exported_unique_crops": len(exported),
             "skipped_exact_duplicates": duplicate_count,
             "invalid_items_count": len(invalid_items),
@@ -609,6 +934,7 @@ def export_dataset(
                 "test_ratio": config.ocr_rec_dataset_test_ratio,
                 "padding_ratio": config.ocr_rec_dataset_padding_ratio,
                 "deduplicate": config.ocr_rec_dataset_deduplicate,
+                "batch_size": batch_size,
             },
         }
         if staging is not None:
@@ -616,12 +942,12 @@ def export_dataset(
                 json.dumps(statistics, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+            checkpoint_path.unlink(missing_ok=True)
+            records_path.unlink(missing_ok=True)
             staging.replace(output_dir)
         return statistics
-    except Exception:
-        if staging is not None:
-            shutil.rmtree(staging, ignore_errors=True)
-        raise
+    finally:
+        database.close()
 
 
 def main() -> None:
@@ -640,6 +966,8 @@ def main() -> None:
         output_dir=resolved_output,
         config=config,
         dry_run=args.dry_run,
+        batch_size=args.batch_size,
+        resume=args.resume,
     )
     if args.dry_run:
         print(

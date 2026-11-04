@@ -1,24 +1,46 @@
 import sys
 
+import pytest
+
 from tools.export_ocr_recognition_dataset import (
     _recommended_max_text_length,
     normalize_text,
     parse_args,
     padded_crop_box,
     split_document_ids,
+    export_dataset,
 )
 
 
-def test_parse_args_accepts_dry_run(monkeypatch) -> None:
+def test_parse_args_accepts_dry_run_and_batch_size(monkeypatch) -> None:
     monkeypatch.setattr(
         sys,
         "argv",
-        ["export_ocr_recognition_dataset", "--dry-run"],
+        [
+            "export_ocr_recognition_dataset",
+            "--dry-run",
+            "--batch-size",
+            "250",
+        ],
     )
 
     args = parse_args()
 
     assert args.dry_run is True
+    assert args.batch_size == 250
+    assert args.resume is False
+
+
+def test_export_rejects_invalid_batch_options_before_accessing_db(tmp_path) -> None:
+    with pytest.raises(ValueError, match="batch-size"):
+        export_dataset(output_dir=tmp_path / "out", config=None, batch_size=0)
+    with pytest.raises(ValueError, match="cannot be combined"):
+        export_dataset(
+            output_dir=tmp_path / "out",
+            config=None,
+            dry_run=True,
+            resume=True,
+        )
 
 
 def test_normalize_text_keeps_visible_unicode_and_removes_line_breaks() -> None:
