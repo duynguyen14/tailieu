@@ -20,6 +20,8 @@ class DocumentClassifierSettings(BaseSettings):
     )
 
     dataset_export_dir: Path = Path("data/training/document_classifier")
+    dataset_source_database: str = "anotation_2"
+    dataset_version: str = "document-classifier-anotation2-v3"
     dataset_copy_mode: Literal["copy", "hardlink"] = "copy"
     dataset_split_seed: int = 42
     dataset_train_ratio: float = Field(default=0.8, gt=0.0, lt=1.0)
@@ -53,6 +55,10 @@ class DocumentClassifierSettings(BaseSettings):
         total = self.dataset_train_ratio + self.dataset_val_ratio + self.dataset_test_ratio
         if abs(total - 1.0) > 1e-9:
             raise ValueError("DATASET_TRAIN_RATIO + DATASET_VAL_RATIO + DATASET_TEST_RATIO must be 1.")
+        if not self.dataset_source_database.strip():
+            raise ValueError("DATASET_SOURCE_DATABASE cannot be empty.")
+        if not self.dataset_version.strip():
+            raise ValueError("DATASET_VERSION cannot be empty.")
         return self
 
     @staticmethod

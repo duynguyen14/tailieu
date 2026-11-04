@@ -230,6 +230,12 @@ def export_dataset(
     config: DocumentClassifierSettings,
 ) -> None:
     app_settings = get_settings()
+    if app_settings.db_name.lower() != config.dataset_source_database.strip().lower():
+        raise RuntimeError(
+            "Classifier dataset source database mismatch: "
+            f"expected {config.dataset_source_database!r}, "
+            f"configured DB_NAME is {app_settings.db_name!r}."
+        )
     storage_root = app_settings.annotation_storage_path.resolve()
     output_dir = output_dir.resolve()
     if output_dir.exists() and not output_dir.is_dir():
@@ -358,6 +364,13 @@ def export_dataset(
         by_split_label[item.split][item.label] += 1
     statistics = {
         "created_at": datetime.now(UTC).isoformat(),
+        "dataset_version": config.dataset_version,
+        "source_database": app_settings.db_name,
+        "selection": {
+            "page_review_status": ReviewStatus.REVIEWED.value,
+            "label_required": True,
+            "model_predictions_used": False,
+        },
         "total_database_rows": len(source_records),
         "exported_unique_images": len(exported),
         "skipped_exact_duplicates": duplicate_count,

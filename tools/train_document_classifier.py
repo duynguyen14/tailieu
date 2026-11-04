@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import random
 from collections import Counter
@@ -86,7 +87,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default=None)
     parser.add_argument("--resume", type=Path, default=None)
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help=(
+            "Explicitly require a brand-new run. This is already the default when "
+            "--resume is omitted; the flag documents intent and rejects --resume."
+        ),
+    )
     return parser.parse_args()
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def set_seed(seed: int, deterministic: bool) -> None:
@@ -270,17 +287,30 @@ def write_json(path: Path, payload: Any) -> None:
 
 def main() -> None:
     args = parse_args()
+    if args.fresh and args.resume is not None:
+        raise RuntimeError("--fresh cannot be combined with --resume.")
     config = DocumentClassifierSettings()
     dataset_root = DocumentClassifierSettings.resolve_path(
         args.dataset_dir or config.dataset_export_dir
     )
     output_dir = DocumentClassifierSettings.resolve_path(args.output_dir or config.train_output_dir)
+    if output_dir.exists() and not output_dir.is_dir():
+        raise RuntimeError(f"Training output path is not a directory: {output_dir}")
+    if args.resume is None and output_dir.exists() and any(output_dir.iterdir()):
+        raise RuntimeError(
+            f"Fresh training output directory is not empty: {output_dir}. "
+            "Use a new TRAIN_OUTPUT_DIR; old checkpoints are never loaded or overwritten."
+        )
     output_dir.mkdir(parents=True, exist_ok=True)
 
     set_seed(config.train_seed, config.train_deterministic)
     device = select_device(args.device or config.train_device, config.train_gpu_device_id)
     use_amp = config.train_mixed_precision and device.type == "cuda"
     class_to_index = load_class_mapping(dataset_root)
+    manifest_hashes = {
+        name: sha256_file(dataset_root / name)
+        for name in ("train.csv", "val.csv", "test.csv", "labels.json")
+    }
     index_to_class = {index: label for label, index in class_to_index.items()}
     train_transform, eval_transform = build_transforms(config.train_image_size)
 
@@ -347,7 +377,15 @@ def main() -> None:
         best_macro_f1 = float(checkpoint.get("best_macro_f1", -1.0))
         history = list(checkpoint.get("history", []))
 
-    print(f"Training on {device}; AMP={use_amp}; classes={len(class_to_index)}")
+    initialization = (
+        "resume_checkpoint"
+        if args.resume is not None
+        else ("imagenet_pretrained" if config.train_pretrained else "random_weights")
+    )
+    print(
+        f"Training on {device}; AMP={use_amp}; classes={len(class_to_index)}; "
+        f"initialization={initialization}"
+    )
     stale_epochs = 0
     for epoch in range(start_epoch, config.train_epochs + 1):
         train_loss, train_targets, train_predictions = run_epoch(
@@ -402,6 +440,9 @@ def main() -> None:
                     "image_size": config.train_image_size,
                     "class_to_index": class_to_index,
                     "normalization": {"mean": IMAGENET_MEAN, "std": IMAGENET_STD},
+                    "initialization": initialization,
+                    "dataset_version": config.dataset_version,
+                    "dataset_manifest_hashes": manifest_hashes,
                     "epoch": epoch,
                     "best_macro_f1": best_macro_f1,
                     "model_state_dict": model.state_dict(),
