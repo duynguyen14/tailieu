@@ -218,7 +218,6 @@ class TesseractOcrEngine:
                 )
         pytesseract.pytesseract.tesseract_cmd = str(command)
         os.environ["OMP_THREAD_LIMIT"] = str(settings.tesseract_threads)
-        os.environ["OMP_NUM_THREADS"] = str(settings.tesseract_threads)
         self._fast_data = fast_data
         self._best_data = best_data
 
@@ -229,8 +228,16 @@ class TesseractOcrEngine:
         return f"tesseract5-lstm:{languages}{suffix}"
 
     def _config(self, *, data_dir: Path, psm: int) -> str:
+        data_dir_value = str(data_dir)
+        if any(character.isspace() for character in data_dir_value):
+            raise OcrModelUnavailableError(
+                "Tesseract tessdata path must not contain spaces when used through "
+                f"pytesseract on Windows: {data_dir}. Configure "
+                "TESSERACT_FAST_DATA_DIR/TESSERACT_BEST_DATA_DIR to a path without "
+                "spaces."
+            )
         return (
-            f'--tessdata-dir "{data_dir}" '
+            f"--tessdata-dir {data_dir_value} "
             f"--oem {self._settings.tesseract_oem} --psm {psm} --dpi 300"
         )
 

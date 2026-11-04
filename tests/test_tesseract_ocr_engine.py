@@ -1,6 +1,12 @@
+from pathlib import Path
+
 from PIL import Image, ImageDraw
 
-from app.models.tesseract_ocr_engine import detect_table_cells, parse_tesseract_data
+from app.models.tesseract_ocr_engine import (
+    TesseractOcrEngine,
+    detect_table_cells,
+    parse_tesseract_data,
+)
 
 
 def test_parse_tesseract_data_groups_words_into_lines() -> None:
@@ -39,3 +45,17 @@ def test_detect_table_cells_finds_simple_grid() -> None:
     image.close()
     assert len(cells) >= 6
     assert all(x2 > x1 and y2 > y1 for x1, y1, x2, y2 in cells)
+
+
+def test_tesseract_config_does_not_embed_literal_quotes() -> None:
+    class SettingsStub:
+        tesseract_oem = 1
+
+    engine = object.__new__(TesseractOcrEngine)
+    engine._settings = SettingsStub()  # type: ignore[attr-defined]
+
+    data_dir = Path("C:/TesseractData/tessdata")
+    config = engine._config(data_dir=data_dir, psm=3)
+
+    assert config.startswith(f"--tessdata-dir {data_dir} ")
+    assert '"' not in config
