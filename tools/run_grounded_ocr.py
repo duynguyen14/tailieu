@@ -23,6 +23,16 @@ from app.db.models import (
     OcrToken,
     utc_now,
 )
+from app.models.ocr_preprocessing import (
+    PreparedOcrImage,
+    load_rgb_image,
+    ocr_quality_score,
+    orientation_probe,
+    png_bytes,
+    prepare_ocr_image,
+    recommended_upscale,
+)
+from app.models.ocr_region_refinement import refine_ocr_tokens
 from app.models.paddle_layout_detector import (
     LayoutRegionPrediction,
     PaddleLayoutDetector,
@@ -32,15 +42,6 @@ from app.models.paddle_ocr_engine import OcrTokenPrediction, PaddleOcrEngine
 from app.models.paddle_orientation import (
     OrientationPrediction,
     PaddleOrientationClassifier,
-)
-from app.models.ocr_preprocessing import (
-    PreparedOcrImage,
-    load_rgb_image,
-    ocr_quality_score,
-    orientation_probe,
-    png_bytes,
-    prepare_ocr_image,
-    recommended_upscale,
 )
 from app.schemas.annotation import ReviewStatus
 from app.services.storage import AnnotationStorage
@@ -84,6 +85,15 @@ def candidate_angles(
 
 def _write_candidate(path: Path, prepared: PreparedOcrImage) -> None:
     path.write_bytes(png_bytes(prepared.image))
+
+
+def effective_preprocess_version(settings) -> str:
+    if not settings.ocr_enable_selective_refinement:
+        return settings.ocr_preprocess_version
+    return (
+        f"{settings.ocr_preprocess_version}"
+        f"|refinement={settings.ocr_refinement_version}"
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -293,6 +303,7 @@ def run(args: argparse.Namespace) -> OcrSummary:
     if args.force and args.pending_review_only:
         raise ValueError("--force cannot be combined with --pending-review-only")
     settings = get_settings()
+    preprocess_version = effective_preprocess_version(settings)
     database = Database(settings)
     storage = AnnotationStorage(settings.annotation_storage_path)
     summary = OcrSummary()
@@ -305,7 +316,7 @@ def run(args: argparse.Namespace) -> OcrSummary:
             limit=args.limit,
             force=args.force,
             pending_review_only=args.pending_review_only,
-            preprocess_version=settings.ocr_preprocess_version,
+            preprocess_version=preprocess_version,
         )
         summary.discovered = len(pages)
         if not pages:
@@ -328,10 +339,16 @@ def run(args: argparse.Namespace) -> OcrSummary:
             orientation_classifier.model_name if orientation_classifier else "disabled"
         )
         layout_model_name = layout_detector.model_name if layout_detector else "disabled"
+        refinement_model_name = (
+            settings.ocr_refinement_version
+            if settings.ocr_enable_selective_refinement
+            else "disabled"
+        )
         print(
             f"Loaded {engine.model_name} on {engine.effective_device}; pages={len(pages)}; "
             f"orientation={orientation_model_name}; "
-            f"exclusion_layout={layout_model_name}"
+            f"exclusion_layout={layout_model_name}; "
+            f"refinement={refinement_model_name}"
         )
         for position, page in enumerate(pages, start=1):
             started = time.perf_counter()
@@ -342,6 +359,7 @@ def run(args: argparse.Namespace) -> OcrSummary:
                     f"{engine.model_name}"
                     f"|orientation={orientation_model_name}"
                     f"|layout={layout_model_name}"
+                    f"|refinement={refinement_model_name}"
                 ),
                 model_version=settings.ocr_model_version,
                 device=engine.effective_device,
@@ -451,10 +469,49 @@ def run(args: argparse.Namespace) -> OcrSummary:
 
                     final_path = temp_root / "selected-final.png"
                     _write_candidate(final_path, selected.prepared)
+                    tokens = selected.tokens
+                    refinement_metadata: dict[str, object] = {
+                        "enabled": False,
+                        "version": settings.ocr_refinement_version,
+                        "attempted": 0,
+                        "replaced": 0,
+                        "unresolved": 0,
+                        "items": [],
+                    }
+                    if settings.ocr_enable_selective_refinement:
+                        refinement = refine_ocr_tokens(
+                            selected.prepared.image,
+                            tokens,
+                            temp_dir=temp_root / "refinement",
+                            predict_many=engine.predict_many,
+                            scales=settings.ocr_refinement_scale_list,
+                            confidence_threshold=(
+                                settings.ocr_refinement_confidence_threshold
+                            ),
+                            candidate_min_confidence=(
+                                settings.ocr_refinement_candidate_min_confidence
+                            ),
+                            agreement_similarity=(
+                                settings.ocr_refinement_agreement_similarity
+                            ),
+                            min_confidence_gain=(
+                                settings.ocr_refinement_min_confidence_gain
+                            ),
+                            max_regions=settings.ocr_refinement_max_regions,
+                            max_seconds=settings.ocr_refinement_max_seconds,
+                            padding_ratio=settings.ocr_refinement_padding_ratio,
+                            max_crop_side=settings.ocr_refinement_max_crop_side,
+                            protect_digits=settings.ocr_refinement_protect_digits,
+                            version=settings.ocr_refinement_version,
+                        )
+                        tokens = refinement.tokens
+                        refinement_metadata = {
+                            "enabled": True,
+                            **refinement.metadata,
+                        }
                     regions = (
                         layout_detector.predict(final_path) if layout_detector else []
                     )
-                    tokens = selected.tokens
                     processed_width, processed_height = selected.prepared.processed_size
                     if selected.prepared.changed:
                         processed_relative_path = (
@@ -485,6 +542,7 @@ def run(args: argparse.Namespace) -> OcrSummary:
                             "candidate_scores": candidate_scores,
                             "selected_quality_score": round(selected.score, 6),
                             "upscale_attempted": round(upscale_attempted, 6),
+                            "selective_refinement": refinement_metadata,
                         }
                     )
                     orientation = OrientationPrediction(
@@ -506,7 +564,7 @@ def run(args: argparse.Namespace) -> OcrSummary:
                     processed_width=processed_width,
                     processed_height=processed_height,
                     preprocess_metadata=preprocess_metadata,
-                    preprocess_version=settings.ocr_preprocess_version,
+                    preprocess_version=preprocess_version,
                     processing_time_ms=elapsed_ms,
                 )
                 summary.completed += 1
@@ -516,6 +574,8 @@ def run(args: argparse.Namespace) -> OcrSummary:
                     f"tokens={len(tokens)} exclusion_regions={len(regions)} "
                     f"orientation={orientation.angle} "
                     f"scale={preprocess_metadata['scale']} "
+                    f"refined={refinement_metadata.get('replaced', 0)}/"
+                    f"{refinement_metadata.get('attempted', 0)} "
                     f"time={elapsed_ms}ms"
                 )
             except Exception as exc:

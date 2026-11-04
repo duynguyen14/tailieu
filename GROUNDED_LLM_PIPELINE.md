@@ -75,7 +75,19 @@ OCR_ENABLE_ORIENTATION=true
 OCR_ORIENTATION_MODEL_NAME=PP-LCNet_x1_0_doc_ori
 OCR_ORIENTATION_MODEL_DIR=
 OCR_ORIENTATION_MIN_CONFIDENCE=0.80
-OCR_PREPROCESS_VERSION=orientation-v1
+OCR_PREPROCESS_VERSION=orientation-content-v2
+OCR_ENABLE_SELECTIVE_REFINEMENT=true
+OCR_REFINEMENT_VERSION=selective-multiscale-v1
+OCR_REFINEMENT_SCALES=2.0,3.0
+OCR_REFINEMENT_CONFIDENCE_THRESHOLD=0.90
+OCR_REFINEMENT_CANDIDATE_MIN_CONFIDENCE=0.70
+OCR_REFINEMENT_AGREEMENT_SIMILARITY=0.96
+OCR_REFINEMENT_MIN_CONFIDENCE_GAIN=0.05
+OCR_REFINEMENT_MAX_REGIONS=32
+OCR_REFINEMENT_MAX_SECONDS=15
+OCR_REFINEMENT_PADDING_RATIO=0.12
+OCR_REFINEMENT_MAX_CROP_SIDE=2400
+OCR_REFINEMENT_PROTECT_DIGITS=true
 OCR_TARGET_PAGE_TYPES=DIPLOMATIC_NOTE,APPLICANT_TABLE,APPLICANT_LIST
 
 LLM_BASE_MODEL_ID=Qwen/Qwen3-4B
@@ -95,6 +107,17 @@ LLM_LORA_DROPOUT=0.05
 
 `auto` selects GPU 0 when the corresponding CUDA runtime is available and
 falls back to CPU only when the fallback flag permits it.
+
+The page is still detected once by PP-OCRv6. After orientation, conservative
+content crop and optional whole-page upscale, only suspicious Vietnamese,
+small or low-confidence regions are cropped from that normalized page and
+re-read at two scales in one Paddle batch. Text is replaced only when both
+scales agree and the confidence policy passes. A different digit sequence is
+never accepted, so document numbers, passport numbers and dates remain on the
+original OCR result for human review. The original text, both candidates,
+scores, decision and reason are stored in
+`ocr_runs.preprocess_metadata_json.selective_refinement`; no new table is
+required and source images are never overwritten.
 
 ## 3. Initialize second-pass audit, case and OCR tables
 

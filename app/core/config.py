@@ -134,6 +134,22 @@ class Settings(BaseSettings):
     ocr_upscale_max_factor: float = Field(default=2.5, ge=1.0, le=4.0)
     ocr_upscale_max_processed_side: int = Field(default=5000, ge=1000, le=12000)
     ocr_preprocess_version: str = "orientation-content-v2"
+    # Conservative second pass for Vietnamese/small/low-confidence regions.
+    # It reuses the warm Paddle pipeline and never changes source coordinates.
+    ocr_enable_selective_refinement: bool = True
+    ocr_refinement_version: str = "selective-multiscale-v1"
+    ocr_refinement_scales: str = "2.0,3.0"
+    ocr_refinement_confidence_threshold: float = Field(default=0.90, ge=0.0, le=1.0)
+    ocr_refinement_candidate_min_confidence: float = Field(
+        default=0.70, ge=0.0, le=1.0
+    )
+    ocr_refinement_agreement_similarity: float = Field(default=0.96, ge=0.0, le=1.0)
+    ocr_refinement_min_confidence_gain: float = Field(default=0.05, ge=0.0, le=1.0)
+    ocr_refinement_max_regions: int = Field(default=32, ge=0, le=256)
+    ocr_refinement_max_seconds: float = Field(default=15.0, ge=0.1, le=300.0)
+    ocr_refinement_padding_ratio: float = Field(default=0.12, ge=0.0, le=0.75)
+    ocr_refinement_max_crop_side: int = Field(default=2400, ge=320, le=8000)
+    ocr_refinement_protect_digits: bool = True
     paddle_pdx_model_source: str = "BOS"
     paddle_pdx_disable_model_source_check: bool = True
 
@@ -234,6 +250,24 @@ class Settings(BaseSettings):
             for item in self.ocr_exclusion_region_types.split(",")
             if item.strip()
         ]
+
+    @property
+    def ocr_refinement_scale_list(self) -> list[float]:
+        values: list[float] = []
+        for raw_value in self.ocr_refinement_scales.split(","):
+            raw_value = raw_value.strip()
+            if not raw_value:
+                continue
+            value = float(raw_value)
+            if value < 1.0 or value > 6.0:
+                raise ValueError("OCR_REFINEMENT_SCALES values must be between 1 and 6.")
+            if value not in values:
+                values.append(value)
+        if self.ocr_enable_selective_refinement and len(values) < 2:
+            raise ValueError(
+                "OCR_REFINEMENT_SCALES must contain at least two distinct scales."
+            )
+        return values
 
     @property
     def llm_base_model_path(self) -> Path:

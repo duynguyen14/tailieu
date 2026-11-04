@@ -200,6 +200,29 @@ class PaddleOcrEngine:
             min_confidence=self._settings.ocr_min_confidence,
         )
 
+    def predict_many(
+        self, image_paths: list[Path]
+    ) -> list[list[OcrTokenPrediction]]:
+        if not image_paths:
+            return []
+        for image_path in image_paths:
+            if not image_path.is_file():
+                raise FileNotFoundError(f"OCR page image does not exist: {image_path}")
+        output = self._pipeline.predict([str(path) for path in image_paths])
+        results = [
+            parse_ocr_tokens(
+                _result_payload(result),
+                min_confidence=self._settings.ocr_min_confidence,
+            )
+            for result in output
+        ]
+        if len(results) != len(image_paths):
+            raise RuntimeError(
+                "PaddleOCR returned a different number of results "
+                f"({len(results)}) than input images ({len(image_paths)})."
+            )
+        return results
+
     def _resolve_device(self, requested: DevicePreference) -> str:
         try:
             import paddle
