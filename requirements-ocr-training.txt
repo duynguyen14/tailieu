@@ -1,0 +1,6 @@
+# Fine-tuning latin_PP-OCRv5_mobile_rec on a CUDA 12.6 Paddle runtime.
+# The PaddleOCR source checkout is managed separately by the training wrapper.
+-r requirements-ocr-gpu.txt
+
+PyYAML>=6.0,<7.0
+
