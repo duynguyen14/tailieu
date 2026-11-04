@@ -203,7 +203,7 @@ class Settings(BaseSettings):
     teacher_api_base_url: str = "http://127.0.0.1:8100/v1"
     teacher_api_key: SecretStr | None = None
     teacher_model: str = "Qwen2.5-Coder-32B-Instruct"
-    teacher_prompt_version: str = "compact-extraction-teacher-v1"
+    teacher_prompt_version: str = "compact-extraction-teacher-v3"
     teacher_schema_version: str = "compact-document-v1"
     teacher_timeout_seconds: float = Field(default=300.0, ge=1.0, le=3600.0)
     teacher_max_tokens: int = Field(default=4096, ge=128, le=16384)

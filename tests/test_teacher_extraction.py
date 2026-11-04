@@ -80,6 +80,11 @@ def test_compact_schema_rejects_duplicate_person_ids_and_invalid_links() -> None
 def test_validate_teacher_output_checks_source_identifiers() -> None:
     result = validate_teacher_output(json.dumps(valid_payload()), candidate=candidate())
     assert '"note_number":"850-2026"' in result
+    assert '"passport_expiration":null' in result
+    assert '"proposed_place_of_visa_collection":null' in result
+    assert '"passport_issue_date":null' in result
+    assert '"passport_issuing_authority":null' in result
+    assert '"port_of_entry":null' in result
 
     mismatched = valid_payload()
     mismatched["case_id"] = "wrong-case"

@@ -14,7 +14,10 @@ class CompactDiplomaticNote(BaseModel):
 
     note_number: str | None = None
     reference_number: str | None = None
-    issue_date: str | None = None
+    issue_date: str | None = Field(
+        default=None,
+        description="Date the diplomatic note was issued; not a travel date.",
+    )
     issue_place: str | None = None
     sender_organization: str | None = None
     recipient_organization: str | None = None
@@ -27,13 +30,63 @@ class CompactApplicant(BaseModel):
     person_id: str = Field(min_length=1)
     sequence_number: str | int | None = None
     full_name: str | None = None
-    date_of_birth: str | None = None
+    date_of_birth: str | None = Field(
+        default=None,
+        description="Applicant date of birth; use YYYY-MM-DD only when unambiguous.",
+    )
     gender: str | None = None
     nationality: str | None = None
     passport_number: str | None = None
+    passport_issue_date: str | None = Field(
+        default=None,
+        description=(
+            "Date this applicant's passport was issued; never use the diplomatic "
+            "note issue date, visa issue date or travel date."
+        ),
+    )
+    passport_expiration: str | None = Field(
+        default=None,
+        description=(
+            "Passport expiry date explicitly associated with this applicant; "
+            "never use visa validity or travel dates."
+        ),
+    )
+    passport_issuing_authority: str | None = Field(
+        default=None,
+        description=(
+            "Authority, country or place explicitly shown as the issuer of this "
+            "applicant's passport."
+        ),
+    )
     visa_type: str | None = None
-    entry_date: str | None = None
-    exit_date: str | None = None
+    entry_date: str | None = Field(
+        default=None,
+        description=(
+            "Applicant's explicitly stated intended/proposed arrival or entry date "
+            "into Vietnam; not note issue date, passport issue date or visa issue date."
+        ),
+    )
+    exit_date: str | None = Field(
+        default=None,
+        description=(
+            "Applicant's explicitly stated intended/proposed departure or exit date "
+            "from Vietnam; not passport expiry or generic visa expiry."
+        ),
+    )
+    proposed_place_of_visa_collection: str | None = Field(
+        default=None,
+        description=(
+            "Place where the applicant explicitly proposes to collect the visa. "
+            "Do not use an airport or border gate merely identified as port of entry."
+        ),
+    )
+    port_of_entry: str | None = Field(
+        default=None,
+        description=(
+            "Explicit intended port, airport or border gate of entry into Vietnam; "
+            "this is different from the place of visa collection."
+        ),
+    )
     occupation: str | None = None
     job_title: str | None = None
     organization: str | None = None
