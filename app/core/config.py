@@ -198,6 +198,19 @@ class Settings(BaseSettings):
     llm_lora_alpha: int = Field(default=32, ge=1, le=512)
     llm_lora_dropout: float = Field(default=0.05, ge=0.0, le=0.5)
 
+    # OpenAI-compatible teacher used only by the offline annotation tool. The
+    # generated JSON remains PENDING until a human reviewer approves it.
+    teacher_api_base_url: str = "http://127.0.0.1:8100/v1"
+    teacher_api_key: SecretStr | None = None
+    teacher_model: str = "Qwen2.5-Coder-32B-Instruct"
+    teacher_prompt_version: str = "compact-extraction-teacher-v1"
+    teacher_schema_version: str = "compact-document-v1"
+    teacher_timeout_seconds: float = Field(default=300.0, ge=1.0, le=3600.0)
+    teacher_max_tokens: int = Field(default=4096, ge=128, le=16384)
+    teacher_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    teacher_use_json_mode: bool = True
+    teacher_max_input_chars: int = Field(default=50_000, ge=1000, le=500_000)
+
     pdf_dpi: int = Field(default=200, ge=72, le=400)
     max_file_size_mb: int = Field(default=30, ge=1, le=500)
     max_pages: int = Field(default=50, ge=1, le=1000)
@@ -327,6 +340,13 @@ class Settings(BaseSettings):
     def llm_dataset_path(self) -> Path:
         path = self.llm_dataset_dir
         return path.resolve() if path.is_absolute() else (PROJECT_ROOT / path).resolve()
+
+    @property
+    def teacher_chat_completions_url(self) -> str:
+        base_url = self.teacher_api_base_url.strip().rstrip("/")
+        if not base_url.startswith(("http://", "https://")):
+            raise ValueError("TEACHER_API_BASE_URL must start with http:// or https://")
+        return f"{base_url}/chat/completions"
 
     @property
     def annotation_storage_path(self) -> Path:

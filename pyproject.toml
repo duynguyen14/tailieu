@@ -9,6 +9,7 @@ description = "Synchronous CPU/GPU-ready API skeleton for diplomatic note and ap
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115,<1.0",
+    "httpx>=0.27,<1.0",
     "pydantic-settings>=2.6,<3.0",
     "pyodbc>=5.2,<6.0",
     "pymupdf>=1.25,<2.0",

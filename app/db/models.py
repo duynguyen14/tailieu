@@ -279,6 +279,160 @@ class CaseTextReconstruction(Base):
     )
 
     case: Mapped[DocumentCase] = relationship(back_populates="text_reconstructions")
+    teacher_jobs: Mapped[list[TeacherExtractionJob]] = relationship(
+        back_populates="reconstruction",
+        cascade="all, delete-orphan",
+        order_by="TeacherExtractionJob.created_at",
+    )
+
+
+class TeacherExtractionJob(Base):
+    __tablename__ = "teacher_extraction_jobs"
+    __table_args__ = (
+        UniqueConstraint("input_hash", name="uq_teacher_extraction_job_input_hash"),
+        CheckConstraint(
+            "status IN ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED')",
+            name="ck_teacher_extraction_job_status",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0", name="ck_teacher_extraction_job_attempt_count"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    reconstruction_id: Mapped[str] = mapped_column(
+        ForeignKey("case_text_reconstructions.id"), nullable=False, index=True
+    )
+    case_id: Mapped[str] = mapped_column(
+        ForeignKey("document_cases.id"), nullable=False, index=True
+    )
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("annotation_documents.id"), nullable=False, index=True
+    )
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    input_text: Mapped[str] = mapped_column(Unicode(), nullable=False)
+    source_structure_json: Mapped[str] = mapped_column(Unicode(), nullable=False)
+    reconstruction_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    teacher_model: Mapped[str] = mapped_column(String(255), nullable=False)
+    teacher_endpoint: Mapped[str] = mapped_column(String(500), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="PENDING", index=True
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(Unicode(), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    reconstruction: Mapped[CaseTextReconstruction] = relationship(
+        back_populates="teacher_jobs"
+    )
+    case: Mapped[DocumentCase] = relationship()
+    document: Mapped[AnnotationDocument] = relationship()
+    attempts: Mapped[list[TeacherExtractionAttempt]] = relationship(
+        back_populates="job",
+        cascade="all, delete-orphan",
+        order_by="TeacherExtractionAttempt.attempt_number",
+    )
+    reviews: Mapped[list[TeacherExtractionReview]] = relationship(
+        back_populates="job",
+        cascade="all, delete-orphan",
+        order_by="TeacherExtractionReview.created_at",
+    )
+
+
+class TeacherExtractionAttempt(Base):
+    __tablename__ = "teacher_extraction_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "job_id", "attempt_number", name="uq_teacher_extraction_attempt_number"
+        ),
+        CheckConstraint(
+            "attempt_number >= 1", name="ck_teacher_extraction_attempt_number"
+        ),
+        CheckConstraint(
+            "validation_status IN "
+            "('VALID', 'INVALID', 'PARSE_ERROR', 'HTTP_ERROR', 'TRANSPORT_ERROR')",
+            name="ck_teacher_extraction_attempt_validation",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    job_id: Mapped[str] = mapped_column(
+        ForeignKey("teacher_extraction_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    request_json: Mapped[str] = mapped_column(Unicode(), nullable=False)
+    raw_response_json: Mapped[str | None] = mapped_column(Unicode(), nullable=True)
+    assistant_content: Mapped[str | None] = mapped_column(Unicode(), nullable=True)
+    parsed_output_json: Mapped[str | None] = mapped_column(Unicode(), nullable=True)
+    validation_status: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    validation_errors_json: Mapped[str | None] = mapped_column(Unicode(), nullable=True)
+    http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    finish_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Unicode(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+    job: Mapped[TeacherExtractionJob] = relationship(back_populates="attempts")
+
+
+class TeacherExtractionReview(Base):
+    __tablename__ = "teacher_extraction_reviews"
+    __table_args__ = (
+        CheckConstraint(
+            "review_status IN ('PENDING', 'APPROVED', 'REJECTED')",
+            name="ck_teacher_extraction_review_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    job_id: Mapped[str] = mapped_column(
+        ForeignKey("teacher_extraction_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    source_attempt_id: Mapped[str] = mapped_column(
+        ForeignKey("teacher_extraction_attempts.id"), nullable=False, index=True
+    )
+    parent_review_id: Mapped[str | None] = mapped_column(
+        ForeignKey("teacher_extraction_reviews.id"), nullable=True
+    )
+    reviewed_output_json: Mapped[str] = mapped_column(Unicode(), nullable=False)
+    review_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="PENDING", index=True
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    review_note: Mapped[str | None] = mapped_column(Unicode(), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    job: Mapped[TeacherExtractionJob] = relationship(back_populates="reviews")
+    source_attempt: Mapped[TeacherExtractionAttempt] = relationship()
 
 
 class OcrRun(Base):

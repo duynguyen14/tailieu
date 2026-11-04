@@ -327,3 +327,34 @@ data/training/grounded_llm/sft/test.jsonl
 
 The next phase is a review UI for creating `reviewed_targets.jsonl`, followed by
 the QLoRA training script and grounded inference API.
+## Teacher tạo nhãn JSON compact
+
+Các bảng teacher chỉ được tạo trong `anotation_2`. Kết quả model lớn luôn đi vào
+hàng đợi `PENDING`; chưa được dùng để train student cho tới khi người kiểm định
+chuyển bản review sang `APPROVED`.
+
+```powershell
+# Tạo schema, chạy lặp lại an toàn.
+python -m tools.init_teacher_extraction_db
+
+# Dựng snapshot text từ các hồ sơ có OCR human-approved.
+python -m tools.reconstruct_case_text --ready-only --include-incomplete --limit 5 --dry-run --print-text
+python -m tools.reconstruct_case_text --ready-only --include-incomplete --limit 5
+
+# Chỉ xem các hồ sơ đủ điều kiện; không ghi DB và không gọi model lớn.
+python -m tools.generate_teacher_extractions --limit 5
+
+# Nếu text mới dựng chưa được human review, phải bật rõ ràng cờ này.
+python -m tools.generate_teacher_extractions --limit 5 --include-generated
+
+# Tạo job và gọi teacher đồng bộ. Nên thử 1 hồ sơ trước.
+python -m tools.generate_teacher_extractions --limit 1 --execute
+
+# Gọi lại các job thất bại mà không thay đổi snapshot đầu vào.
+python -m tools.generate_teacher_extractions --limit 5 --execute --retry-failed
+```
+
+Có thể chọn đúng một hồ sơ bằng `--case-id`, `--document-id` hoặc
+`--filename 000001.pdf`. Mỗi job giữ nguyên snapshot text, schema, prompt và model;
+mỗi lần gọi được lưu thành một attempt riêng nên không ghi đè lịch sử.
+
