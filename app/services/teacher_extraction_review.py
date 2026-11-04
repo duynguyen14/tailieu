@@ -57,9 +57,14 @@ class TeacherExtractionReviewService:
             stats = self._statistics(session)
             review = session.scalar(
                 self._detail_statement()
+                .join(
+                    TeacherExtractionJob,
+                    TeacherExtractionJob.id == TeacherExtractionReview.job_id,
+                )
                 .where(
                     TeacherExtractionReview.is_active == true(),
                     TeacherExtractionReview.review_status == "PENDING",
+                    TeacherExtractionJob.is_active == true(),
                 )
                 .order_by(
                     TeacherExtractionReview.created_at.asc(),
@@ -114,6 +119,10 @@ class TeacherExtractionReviewService:
             if not current.is_active:
                 raise TeacherExtractionReviewConflictError(
                     "This teacher review is no longer the active version."
+                )
+            if not current.job.is_active:
+                raise TeacherExtractionReviewConflictError(
+                    "This teacher review belongs to an obsolete teacher job."
                 )
             if validated.case_id != current.job.case_id:
                 raise TeacherExtractionReviewValidationError(
@@ -250,7 +259,14 @@ class TeacherExtractionReviewService:
                 TeacherExtractionReview.review_status,
                 func.count(TeacherExtractionReview.id),
             )
-            .where(TeacherExtractionReview.is_active == true())
+            .join(
+                TeacherExtractionJob,
+                TeacherExtractionJob.id == TeacherExtractionReview.job_id,
+            )
+            .where(
+                TeacherExtractionReview.is_active == true(),
+                TeacherExtractionJob.is_active == true(),
+            )
             .group_by(TeacherExtractionReview.review_status)
         ).all()
         counts = {status: count for status, count in rows}

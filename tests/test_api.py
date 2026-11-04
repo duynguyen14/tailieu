@@ -285,6 +285,18 @@ def test_teacher_extraction_review_versions_json_and_updates_queue() -> None:
         assert queued_payload["current"]["case"]["original_filename"] == "teacher.pdf"
         assert queued_payload["current"]["attempt"]["latency_ms"] == 1200
 
+        with client.app.state.database.session() as session:
+            job = session.get(TeacherExtractionJob, job_id)
+            assert job is not None
+            job.is_active = False
+        hidden_queue = client.get("/api/v1/teacher-extraction/review/next").json()
+        assert hidden_queue["current"] is None
+        assert hidden_queue["stats"]["total"] == 0
+        with client.app.state.database.session() as session:
+            job = session.get(TeacherExtractionJob, job_id)
+            assert job is not None
+            job.is_active = True
+
         edited_output = {**output, "note": {"note_number": "850-2026-A"}}
         saved = client.put(
             f"/api/v1/teacher-extraction/{review_id}/review",
