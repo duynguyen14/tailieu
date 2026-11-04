@@ -10,6 +10,10 @@ from tools.train_ocr_recognition import (
 )
 
 
+def test_paddle_entrypoint_exists() -> None:
+    assert (Path(__file__).parents[1] / "tools" / "paddleocr_entrypoint.py").is_file()
+
+
 def dataset(tmp_path: Path) -> DatasetInfo:
     return DatasetInfo(
         dataset_dir=tmp_path,

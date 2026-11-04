@@ -500,6 +500,7 @@ def run(args: argparse.Namespace) -> None:
     )
     train_command = [
         sys.executable,
+        str(PROJECT_ROOT / "tools" / "paddleocr_entrypoint.py"),
         str(repository / "tools" / "train.py"),
         "-c",
         str(generated_config_path),
@@ -556,6 +557,7 @@ def run(args: argparse.Namespace) -> None:
         )
     export_command = [
         sys.executable,
+        str(PROJECT_ROOT / "tools" / "paddleocr_entrypoint.py"),
         str(repository / "tools" / "export_model.py"),
         "-c",
         str(generated_config_path),
