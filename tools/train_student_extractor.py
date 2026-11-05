@@ -59,6 +59,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--eval-batch-size", type=int)
     parser.add_argument("--gradient-accumulation-steps", type=int)
+    parser.add_argument(
+        "--gradient-checkpointing",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
     parser.add_argument("--learning-rate", type=float)
     parser.add_argument("--max-sequence-length", type=int)
     parser.add_argument("--checkpoint", type=Path)
@@ -90,6 +95,7 @@ def apply_cli_overrides(args: argparse.Namespace) -> StudentExtractorTrainSettin
         "batch_size": "student_train_batch_size",
         "eval_batch_size": "student_train_eval_batch_size",
         "gradient_accumulation_steps": "student_train_gradient_accumulation_steps",
+        "gradient_checkpointing": "student_train_gradient_checkpointing",
         "learning_rate": "student_train_learning_rate",
         "max_sequence_length": "student_train_max_sequence_length",
         "checkpoint": "student_train_resume_from_checkpoint",
@@ -257,6 +263,9 @@ def settings_environment(settings: StudentExtractorTrainSettings) -> dict[str, s
             environment[key] = str(value)
     if settings.student_train_device == "gpu":
         environment["CUDA_VISIBLE_DEVICES"] = settings.student_train_gpu_device_ids
+        environment.setdefault(
+            "PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True"
+        )
     if settings.student_train_offline:
         environment["HF_HUB_OFFLINE"] = "1"
         environment["TRANSFORMERS_OFFLINE"] = "1"
@@ -510,6 +519,8 @@ def run_worker(settings: StudentExtractorTrainSettings) -> None:
     ] = torch_dtype
     model = AutoModelForCausalLM.from_pretrained(model_source, **model_load_options)
     model.config.use_cache = False
+    if settings.student_train_gradient_checkpointing:
+        model.enable_input_require_grads()
     lora_config = LoraConfig(
         r=settings.student_train_lora_rank,
         lora_alpha=settings.student_train_lora_alpha,
@@ -529,12 +540,21 @@ def run_worker(settings: StudentExtractorTrainSettings) -> None:
         * settings.student_train_gradient_accumulation_steps
         * world_size
     )
+    maximum_train_tokens = max(
+        (len(item["input_ids"]) for item in train_items), default=0
+    )
+    maximum_val_tokens = max(
+        (len(item["input_ids"]) for item in val_items), default=0
+    )
     if int(os.getenv("LOCAL_RANK", "0")) == 0:
         print(
             f"Student training: model={model_source}; train={len(train_items)}; "
             f"val={len(val_items)}; world_size={world_size}; precision={precision}; "
             f"effective_batch={effective_batch}; trainable="
-            f"{trainable_parameters:,}/{total_parameters:,}"
+            f"{trainable_parameters:,}/{total_parameters:,}; max_tokens="
+            f"train:{maximum_train_tokens},val:{maximum_val_tokens}; "
+            f"gradient_checkpointing="
+            f"{settings.student_train_gradient_checkpointing}"
         )
         model.print_trainable_parameters()
     training_argument_options: dict[str, Any] = {
@@ -585,6 +605,13 @@ def run_worker(settings: StudentExtractorTrainSettings) -> None:
         )
     if "save_safetensors" in training_argument_parameters:
         training_argument_options["save_safetensors"] = True
+    if (
+        settings.student_train_gradient_checkpointing
+        and "gradient_checkpointing_kwargs" in training_argument_parameters
+    ):
+        training_argument_options["gradient_checkpointing_kwargs"] = {
+            "use_reentrant": False
+        }
     unsupported_arguments = sorted(
         set(training_argument_options) - set(training_argument_parameters)
     )

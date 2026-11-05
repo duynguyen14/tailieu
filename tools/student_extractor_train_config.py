@@ -44,10 +44,10 @@ class StudentExtractorTrainSettings(BaseSettings):
     student_train_device: str = "gpu"
     student_train_gpu_device_ids: str = "2,3,4"
     student_train_epochs: int = Field(default=30, ge=1, le=1000)
-    student_train_batch_size: int = Field(default=2, ge=1, le=256)
+    student_train_batch_size: int = Field(default=1, ge=1, le=256)
     student_train_eval_batch_size: int = Field(default=2, ge=1, le=256)
     student_train_gradient_accumulation_steps: int = Field(
-        default=4, ge=1, le=1024
+        default=8, ge=1, le=1024
     )
     student_train_learning_rate: float = Field(default=0.0002, gt=0.0, le=1.0)
     student_train_weight_decay: float = Field(default=0.01, ge=0.0, le=1.0)
@@ -64,7 +64,7 @@ class StudentExtractorTrainSettings(BaseSettings):
     student_train_early_stopping_patience: int = Field(default=5, ge=0, le=100)
     student_train_save_total_limit: int = Field(default=3, ge=1, le=100)
     student_train_seed: int = Field(default=42, ge=0)
-    student_train_gradient_checkpointing: bool = False
+    student_train_gradient_checkpointing: bool = True
     student_train_fail_on_truncation: bool = True
     student_train_merge_after_train: bool = True
     student_train_overwrite_output: bool = False
