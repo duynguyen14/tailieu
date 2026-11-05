@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -296,6 +297,31 @@ def _common_prefix_length(left: list[int], right: list[int]) -> int:
     return length
 
 
+def _normalize_token_ids(encoded: Any, *, context: str) -> list[int]:
+    """Return plain token IDs across Transformers v4/v5 tokenizer outputs."""
+
+    if isinstance(encoded, Mapping):
+        if "input_ids" not in encoded:
+            raise RuntimeError(f"{context} tokenizer output has no input_ids")
+        encoded = encoded["input_ids"]
+    if hasattr(encoded, "tolist"):
+        encoded = encoded.tolist()
+    while (
+        isinstance(encoded, (list, tuple))
+        and len(encoded) == 1
+        and isinstance(encoded[0], (list, tuple))
+    ):
+        encoded = encoded[0]
+    if not isinstance(encoded, (list, tuple)) or any(
+        not isinstance(token_id, int) or isinstance(token_id, bool)
+        for token_id in encoded
+    ):
+        raise RuntimeError(
+            f"{context} tokenizer output is not a one-dimensional integer sequence"
+        )
+    return [int(token_id) for token_id in encoded]
+
+
 def tokenize_records(
     records: Iterable[DatasetRecord],
     *,
@@ -308,17 +334,19 @@ def tokenize_records(
     for record in records:
         user_message = {"role": "user", "content": record.user_text}
         assistant_message = {"role": "assistant", "content": record.assistant_text}
-        prompt_ids = list(
+        prompt_ids = _normalize_token_ids(
             tokenizer.apply_chat_template(
                 [user_message], tokenize=True, add_generation_prompt=True
-            )
+            ),
+            context=f"Record {record.record_id} prompt",
         )
-        full_ids = list(
+        full_ids = _normalize_token_ids(
             tokenizer.apply_chat_template(
                 [user_message, assistant_message],
                 tokenize=True,
                 add_generation_prompt=False,
-            )
+            ),
+            context=f"Record {record.record_id} full conversation",
         )
         prefix_length = _common_prefix_length(prompt_ids, full_ids)
         if prefix_length < max(1, int(len(prompt_ids) * 0.80)):
@@ -336,8 +364,9 @@ def tokenize_records(
             # non-empty JSON target.  Re-encode that target explicitly instead
             # of dropping an otherwise valid supervised example.
             prompt = prompt_ids
-            target = list(
-                tokenizer.encode(record.assistant_text, add_special_tokens=False)
+            target = _normalize_token_ids(
+                tokenizer.encode(record.assistant_text, add_special_tokens=False),
+                context=f"Record {record.record_id} explicit target",
             )
             eos_token_id = tokenizer.eos_token_id
             if eos_token_id is not None and (
