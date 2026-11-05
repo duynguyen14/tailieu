@@ -157,6 +157,31 @@ def load_runtime(args: argparse.Namespace) -> tuple[Any, Any, Any, str]:
     return torch, tokenizer, model, runtime_device
 
 
+def generation_stop_token_ids(tokenizer: Any, model: Any) -> list[int]:
+    """Keep both Gemma EOS and end-of-turn tokens.
+
+    Gemma 3 instruction checkpoints normally stop on either token 1 or token
+    106.  ``tokenizer.eos_token_id`` only exposes token 1 in some Transformers
+    versions, so using it alone makes generation run until max_new_tokens.
+    """
+
+    candidates: list[Any] = [
+        getattr(model.generation_config, "eos_token_id", None),
+        getattr(model.config, "eos_token_id", None),
+        getattr(tokenizer, "eos_token_id", None),
+        tokenizer.convert_tokens_to_ids("<end_of_turn>"),
+    ]
+    values: list[int] = []
+    for candidate in candidates:
+        items = candidate if isinstance(candidate, (list, tuple)) else [candidate]
+        for item in items:
+            if isinstance(item, int) and item >= 0 and item not in values:
+                values.append(item)
+    if not values:
+        raise RuntimeError("The tokenizer/model exposes no generation stop token")
+    return values
+
+
 def evaluate_record(
     record: DatasetRecord,
     *,
@@ -178,6 +203,7 @@ def evaluate_record(
     )
     encoded = {key: value.to(runtime_device) for key, value in encoded.items()}
     prompt_tokens = int(encoded["input_ids"].shape[-1])
+    stop_token_ids = generation_stop_token_ids(tokenizer, model)
 
     if runtime_device.startswith("cuda"):
         torch.cuda.synchronize()
@@ -188,7 +214,7 @@ def evaluate_record(
             max_new_tokens=max_new_tokens,
             do_sample=False,
             pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id,
+            eos_token_id=stop_token_ids,
         )
     if runtime_device.startswith("cuda"):
         torch.cuda.synchronize()
@@ -340,9 +366,10 @@ def main() -> None:
         raise RuntimeError(f"Dataset split is empty: {dataset_file}")
 
     torch, tokenizer, model, runtime_device = load_runtime(args)
+    stop_token_ids = generation_stop_token_ids(tokenizer, model)
     print(
         f"Evaluating {len(records)} {args.split} record(s) on {runtime_device}; "
-        f"model={resolve_path(args.model_dir)}"
+        f"model={resolve_path(args.model_dir)}; stop_tokens={stop_token_ids}"
     )
     results: list[PredictionResult] = []
     for index, record in enumerate(records, start=1):
@@ -363,6 +390,9 @@ def main() -> None:
             f"fields={result.correct_fields}/{result.expected_fields} "
             f"latency={result.latency_ms:.0f}ms tokens={result.generated_tokens}"
         )
+        if not result.schema_valid:
+            preview = result.raw_output.replace("\n", " ")[:300]
+            print(f"  error={result.error}; output={preview!r}")
 
     metrics = build_metrics(results, args)
     output_dir = resolve_path(args.output_dir)
