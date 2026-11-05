@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from enum import StrEnum
-
 from pydantic import BaseModel, Field
+
+from app.compat import StrEnum
 
 from app.schemas.annotation import AnnotationLabel, AnnotationPageSummary
 

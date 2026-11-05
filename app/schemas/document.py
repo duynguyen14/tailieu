@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.compat import StrEnum
 
 BBox = Annotated[
     tuple[float, float, float, float],

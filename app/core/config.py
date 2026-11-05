@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from enum import StrEnum
 from functools import lru_cache
 from os.path import abspath
 from pathlib import Path
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.compat import StrEnum
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 

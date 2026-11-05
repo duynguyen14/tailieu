@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from enum import StrEnum
 from typing import Annotated
 
 from pydantic import BaseModel, Field, model_validator
+
+from app.compat import StrEnum
 
 
 BBox = Annotated[tuple[int, int, int, int], Field(description="[x1, y1, x2, y2]")]
