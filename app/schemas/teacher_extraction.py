@@ -68,6 +68,13 @@ class CompactApplicant(BaseModel):
         ),
     )
     visa_type: str | None = None
+    number_of_entries: str | None = Field(
+        default=None,
+        description=(
+            "Visa entry validity explicitly stated for this applicant, normally "
+            "SINGLE or MULTIPLE."
+        ),
+    )
     entry_date: str | None = Field(
         default=None,
         description=(

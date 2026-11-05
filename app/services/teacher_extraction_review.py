@@ -112,15 +112,6 @@ class TeacherExtractionReviewService:
                 "Reviewer name cannot be empty."
             )
 
-        try:
-            validated = CompactDocumentExtraction.model_validate(
-                payload.reviewed_output
-            )
-        except ValidationError as exc:
-            raise TeacherExtractionReviewValidationError(
-                f"Compact JSON is invalid: {exc}"
-            ) from exc
-
         with self._database.session() as session:
             current = session.scalar(
                 self._detail_statement()
@@ -139,14 +130,13 @@ class TeacherExtractionReviewService:
                 raise TeacherExtractionReviewConflictError(
                     "This teacher review belongs to an obsolete teacher job."
                 )
-            if validated.case_id != current.job.case_id:
-                raise TeacherExtractionReviewValidationError(
-                    "JSON case_id does not match the teacher job."
-                )
-            if validated.document_id != current.job.document_id:
-                raise TeacherExtractionReviewValidationError(
-                    "JSON document_id does not match the teacher job."
-                )
+            # The review form is the source of truth. Persist its JSON without
+            # running the teacher schema validator again; only immutable source
+            # identifiers are enforced by the server.
+            reviewed_output = dict(payload.reviewed_output)
+            reviewed_output["case_id"] = current.job.case_id
+            reviewed_output["document_id"] = current.job.document_id
+            reviewed_output.setdefault("schema_version", current.job.schema_version)
 
             now = utc_now()
             session.execute(
@@ -164,7 +154,7 @@ class TeacherExtractionReviewService:
                 source_attempt_id=current.source_attempt_id,
                 parent_review_id=current.id,
                 reviewed_output_json=json.dumps(
-                    validated.model_dump(mode="json"),
+                    reviewed_output,
                     ensure_ascii=False,
                     separators=(",", ":"),
                 ),
@@ -218,12 +208,16 @@ class TeacherExtractionReviewService:
             raise TeacherExtractionReviewConflictError(
                 "Stored teacher review output is not a JSON object."
             )
+        preview_error: str | None = None
         try:
             extraction = CompactDocumentExtraction.model_validate(output)
+            compact_target = compact_document_to_student_target(extraction)
         except ValidationError as exc:
-            raise TeacherExtractionReviewConflictError(
-                f"Stored teacher review output is invalid: {exc}"
-            ) from exc
+            # A reviewer must still be able to reopen and repair a loosely
+            # structured JSON version. Approval/export can be handled after the
+            # form has brought it back to the canonical shape.
+            compact_target = []
+            preview_error = str(exc)
 
         approved_ocr_pages = self._ocr_review_service.get_document_pages_in_session(
             session,
@@ -231,7 +225,9 @@ class TeacherExtractionReviewService:
             included_only=True,
         )
 
-        compact_target = compact_document_to_student_target(extraction)
+        descriptor = student_schema_descriptor()
+        if preview_error:
+            descriptor["preview_error"] = preview_error
         return TeacherExtractionReviewDetail(
             review=TeacherExtractionReviewInfo(
                 id=review.id,
@@ -284,7 +280,7 @@ class TeacherExtractionReviewService:
                 input_text=job.input_text,
                 user_prompt=build_student_user_prompt(job.input_text),
                 compact_target=compact_target,
-                schema_descriptor=student_schema_descriptor(),
+                schema_descriptor=descriptor,
             ),
             raw_response=self._json_value(attempt.raw_response_json),
             validation_errors=self._json_value(attempt.validation_errors_json),

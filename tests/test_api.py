@@ -297,7 +297,18 @@ def test_teacher_extraction_review_versions_json_and_updates_queue() -> None:
             assert job is not None
             job.is_active = True
 
-        edited_output = {**output, "note": {"note_number": "850-2026-A"}}
+        edited_output = {
+            **output,
+            "note": {"note_number": "850-2026-A"},
+            "applicants": [
+                {
+                    "person_id": "person_1",
+                    "sequence_number": 1,
+                    "full_name": "NICHOLAS JOHN HOGARTH",
+                    "number_of_entries": "MULTIPLE",
+                }
+            ],
+        }
         saved = client.put(
             f"/api/v1/teacher-extraction/{review_id}/review",
             json={
@@ -313,6 +324,10 @@ def test_teacher_extraction_review_versions_json_and_updates_queue() -> None:
         assert saved_id != review_id
         assert saved_payload["review"]["parent_review_id"] == review_id
         assert saved_payload["reviewed_output"]["note"]["note_number"] == "850-2026-A"
+        assert (
+            saved_payload["reviewed_output"]["applicants"][0]["number_of_entries"]
+            == "MULTIPLE"
+        )
 
         approved = client.put(
             f"/api/v1/teacher-extraction/{saved_id}/review",

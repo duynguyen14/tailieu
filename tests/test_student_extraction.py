@@ -36,6 +36,7 @@ def extraction() -> CompactDocumentExtraction:
                     "passport_type": "Ordinary",
                     "passport_expiration": "2030-11-13",
                     "nationality": "Australian",
+                    "number_of_entries": "MULTIPLE",
                 },
                 {
                     "person_id": "person_spouse",
@@ -55,11 +56,12 @@ def test_student_target_has_fixed_lengths_and_one_based_relationship() -> None:
 
     assert len(target) == 2
     assert len(target[0]) == len(NOTE_FIELDS) == 7
-    assert all(len(applicant) == len(APPLICANT_FIELDS) == 20 for applicant in target[1])
+    assert all(len(applicant) == len(APPLICANT_FIELDS) == 21 for applicant in target[1])
     assert target[0][0] == "850-2026"
     assert target[1][0][4] == "RF0210530"
-    assert target[1][1][18] == "SPOUSE"
-    assert target[1][1][19] == 1
+    assert target[1][0][10] == "MULTIPLE"
+    assert target[1][1][19] == "SPOUSE"
+    assert target[1][1][20] == 1
 
 
 def test_student_target_round_trip_restores_canonical_backend_fields() -> None:
@@ -73,6 +75,7 @@ def test_student_target_round_trip_restores_canonical_backend_fields() -> None:
     assert restored.note.note_number == "850-2026"
     assert restored.applicants[0].person_id == "person_1"
     assert restored.applicants[0].sequence_number == 1
+    assert restored.applicants[0].number_of_entries == "MULTIPLE"
     assert restored.applicants[1].person_id == "person_2"
     assert restored.applicants[1].related_to_person_id == "person_1"
     assert restored.warnings == []
@@ -85,7 +88,7 @@ def test_student_target_rejects_invalid_shape_and_relationship() -> None:
         )
 
     target = compact_document_to_student_target(extraction())
-    target[1][1][19] = 2
+    target[1][1][20] = 2
     with pytest.raises(ValueError, match="invalid related"):
         student_target_to_compact_document(
             target, case_id="case-1", document_id="document-1"
@@ -135,5 +138,5 @@ def test_training_record_uses_user_and_assistant_messages() -> None:
 def test_prompt_contains_locked_positional_contract() -> None:
     prompt = build_student_user_prompt("source")
     assert "exactly 7 positions" in prompt
-    assert "exactly 20 positions" in prompt
+    assert "exactly 21 positions" in prompt
     assert "one-based applicant position" in prompt
