@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import re
+import shutil
 import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -32,9 +34,11 @@ from app.schemas.teacher_extraction import (
     TEACHER_SCHEMA_VERSION,
     CompactDocumentExtraction,
 )
+from app.services.storage import AnnotationStorage
 
 
 DEFAULT_OUTPUT_DIR = Path("output/kie_alignment_audit_v1")
+DEFAULT_DATASET_DIR = Path("data/training/kie_ser_re_v1")
 MatchStatus = Literal[
     "MATCHED", "AMBIGUOUS", "NOT_FOUND", "SKIPPED_NULL", "SKIPPED_DERIVED"
 ]
@@ -42,6 +46,90 @@ MatchStatus = Literal[
 # These values are business interpretations or summaries, not necessarily literal
 # spans in the source.  They must not reduce the direct KIE alignment score.
 DERIVED_FIELDS = {"note.request_type", "applicant.purpose_of_entry", "applicant.relationship"}
+
+DATE_FIELDS = {
+    "note.issue_date",
+    "applicant.date_of_birth",
+    "applicant.passport_issue_date",
+    "applicant.passport_expiration",
+    "applicant.entry_date",
+    "applicant.exit_date",
+}
+
+FIELD_CONTEXT_ALIASES: dict[str, tuple[str, ...]] = {
+    "note.issue_date": ("date", "dated", "ngay", "ngày"),
+    "applicant.date_of_birth": (
+        "date of birth",
+        "birth date",
+        "dob",
+        "ngay sinh",
+        "ngày sinh",
+    ),
+    "applicant.passport_issue_date": (
+        "date of issue",
+        "issue date",
+        "ngay cap",
+        "ngày cấp",
+    ),
+    "applicant.passport_expiration": (
+        "date of expiry",
+        "expiry date",
+        "expiration",
+        "valid until",
+        "ngay het han",
+        "ngày hết hạn",
+    ),
+    "applicant.entry_date": (
+        "entry date",
+        "date of entry",
+        "arrival date",
+        "proposed date of entry",
+        "ngay nhap canh",
+        "ngày nhập cảnh",
+        "du kien nhap canh",
+        "dự kiến nhập cảnh",
+    ),
+    "applicant.exit_date": (
+        "exit date",
+        "date of exit",
+        "departure date",
+        "proposed date of exit",
+        "ngay xuat canh",
+        "ngày xuất cảnh",
+        "du kien xuat canh",
+        "dự kiến xuất cảnh",
+    ),
+}
+
+ENGLISH_MONTHS = (
+    ("January", "Jan"),
+    ("February", "Feb"),
+    ("March", "Mar"),
+    ("April", "Apr"),
+    ("May", "May"),
+    ("June", "Jun"),
+    ("July", "Jul"),
+    ("August", "Aug"),
+    ("September", "Sep", "Sept"),
+    ("October", "Oct"),
+    ("November", "Nov"),
+    ("December", "Dec"),
+)
+
+VIETNAMESE_MONTHS = (
+    ("một", "mot", "giêng", "gieng"),
+    ("hai",),
+    ("ba",),
+    ("tư", "tu", "bốn", "bon"),
+    ("năm", "nam"),
+    ("sáu", "sau"),
+    ("bảy", "bay"),
+    ("tám", "tam"),
+    ("chín", "chin"),
+    ("mười", "muoi"),
+    ("mười một", "muoi mot"),
+    ("mười hai", "muoi hai"),
+)
 
 
 @dataclass(frozen=True)
@@ -55,6 +143,13 @@ class AuditToken:
     page_order: int
     page_width: int
     page_height: int
+    source_width: int
+    source_height: int
+    image_relative_path: str
+    source_image_relative_path: str
+    is_preprocessed: bool
+    orientation_angle: int
+    preprocess_metadata: dict[str, Any] | None
     x1: int
     y1: int
     x2: int
@@ -107,6 +202,7 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--dataset-dir", type=Path, default=DEFAULT_DATASET_DIR)
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--minimum-score", type=float, default=0.88)
     parser.add_argument("--ambiguity-margin", type=float, default=0.035)
@@ -118,6 +214,11 @@ def parse_args() -> argparse.Namespace:
         help="Read and audit the DB but only print the summary; write no files.",
     )
     parser.add_argument("--fail-on-invalid", action="store_true")
+    parser.add_argument(
+        "--no-copy-images",
+        action="store_true",
+        help="Keep storage-relative image references instead of copying page images.",
+    )
     return parser.parse_args()
 
 
@@ -141,17 +242,52 @@ def _date_variants(value: str) -> set[str]:
         parsed = date(year, month, day)
     except ValueError:
         return variants
+    day = parsed.day
+    month = parsed.month
+    year = parsed.year
+    short_year = year % 100
+    ordinal = "th" if 10 <= day % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(
+        day % 10, "th"
+    )
+    for separator in ("/", "-", ".", " "):
+        variants.update(
+            {
+                f"{day:02d}{separator}{month:02d}{separator}{year}",
+                f"{day}{separator}{month}{separator}{year}",
+                f"{year}{separator}{month:02d}{separator}{day:02d}",
+                f"{day:02d}{separator}{month:02d}{separator}{short_year:02d}",
+                f"{month:02d}{separator}{day:02d}{separator}{year}",
+            }
+        )
+    for month_name in ENGLISH_MONTHS[month - 1]:
+        variants.update(
+            {
+                f"{day} {month_name} {year}",
+                f"{day:02d} {month_name} {year}",
+                f"{day}{ordinal} {month_name} {year}",
+                f"{month_name} {day}, {year}",
+                f"{month_name} {day} {year}",
+                f"{month_name} {day}{ordinal}, {year}",
+                f"{day} {month_name} {short_year:02d}",
+            }
+        )
     variants.update(
         {
-            parsed.strftime("%d/%m/%Y"),
-            parsed.strftime("%d-%m-%Y"),
-            parsed.strftime("%d.%m.%Y"),
-            f"{parsed.day}/{parsed.month}/{parsed.year}",
-            f"{parsed.day}-{parsed.month}-{parsed.year}",
-            parsed.strftime("%B %d, %Y"),
-            parsed.strftime("%d %B %Y"),
+            f"ngày {day} tháng {month} năm {year}",
+            f"ngay {day} thang {month} nam {year}",
+            f"ngày {day:02d} tháng {month:02d} năm {year}",
+            f"ngay {day:02d} thang {month:02d} nam {year}",
         }
     )
+    for month_name in VIETNAMESE_MONTHS[month - 1]:
+        variants.update(
+            {
+                f"ngày {day} tháng {month_name} năm {year}",
+                f"ngay {day} thang {month_name} nam {year}",
+                f"{day} tháng {month_name} {year}",
+                f"{day} thang {month_name} {year}",
+            }
+        )
     return variants
 
 
@@ -179,14 +315,25 @@ def _semantic_variants(field_kind: str, value: str) -> set[str]:
     return variants
 
 
-def _score_text(target_variants: Iterable[str], candidate_text: str) -> tuple[float, str]:
+def _date_context_bonus(field_kind: str, candidate_text: str) -> float:
+    if field_kind not in DATE_FIELDS:
+        return 0.0
+    folded_candidate = _fold_text(candidate_text)
+    for alias in FIELD_CONTEXT_ALIASES.get(field_kind, ()):
+        if _fold_text(alias) in folded_candidate:
+            return 0.025
+    return 0.0
+
+
+def _score_folded_variants(
+    folded_variants: Iterable[str], candidate_text: str
+) -> tuple[float, str]:
     candidate = _fold_text(candidate_text)
     if not candidate:
         return 0.0, "empty"
     best_score = 0.0
     best_method = "fuzzy"
-    for raw_variant in target_variants:
-        variant = _fold_text(raw_variant)
+    for variant in folded_variants:
         if not variant:
             continue
         if variant == candidate:
@@ -203,6 +350,12 @@ def _score_text(target_variants: Iterable[str], candidate_text: str) -> tuple[fl
         if score > best_score:
             best_score, best_method = score, method
     return min(best_score, 1.0), best_method
+
+
+def _score_text(target_variants: Iterable[str], candidate_text: str) -> tuple[float, str]:
+    return _score_folded_variants(
+        {_fold_text(variant) for variant in target_variants}, candidate_text
+    )
 
 
 def _union_bbox(tokens: list[AuditToken]) -> tuple[int, int, int, int]:
@@ -233,6 +386,7 @@ def find_candidates(
     if not value:
         return []
     variants = _semantic_variants(target.field_kind, value)
+    folded_variants = {_fold_text(variant) for variant in variants}
     pages: dict[str, list[AuditToken]] = defaultdict(list)
     for token in tokens:
         pages[token.page_id].append(token)
@@ -245,7 +399,11 @@ def find_candidates(
             for width in range(1, min(max_span_tokens, len(page_tokens) - start) + 1):
                 span = page_tokens[start : start + width]
                 text = " ".join(token.text.strip() for token in span if token.text.strip())
-                score, method = _score_text(variants, text)
+                score, method = _score_folded_variants(folded_variants, text)
+                context_bonus = _date_context_bonus(target.field_kind, text)
+                if context_bonus:
+                    score = min(1.0, score + context_bonus)
+                    method = f"{method}+date_context"
                 if score < candidate_floor:
                     continue
                 raw_candidates.append(
@@ -394,6 +552,12 @@ def _load_case_tokens(session, case_ids: list[str]) -> dict[str, list[AuditToken
             AnnotationPage.page_number,
             AnnotationPage.width,
             AnnotationPage.height,
+            AnnotationPage.image_relative_path,
+            OcrRun.processed_image_relative_path,
+            OcrRun.processed_width,
+            OcrRun.processed_height,
+            OcrRun.orientation_angle,
+            OcrRun.preprocess_metadata_json,
             OcrReview.id.label("review_id"),
             OcrReview.reviewed_at,
             OcrReviewToken.id.label("review_token_id"),
@@ -452,8 +616,21 @@ def _load_case_tokens(session, case_ids: list[str]) -> dict[str, list[AuditToken
                 page_id=row.page_id,
                 page_number=row.page_number,
                 page_order=row.page_order,
-                page_width=row.width,
-                page_height=row.height,
+                page_width=row.processed_width or row.width,
+                page_height=row.processed_height or row.height,
+                source_width=row.width,
+                source_height=row.height,
+                image_relative_path=(
+                    row.processed_image_relative_path or row.image_relative_path
+                ),
+                source_image_relative_path=row.image_relative_path,
+                is_preprocessed=row.processed_image_relative_path is not None,
+                orientation_angle=row.orientation_angle,
+                preprocess_metadata=(
+                    json.loads(row.preprocess_metadata_json)
+                    if row.preprocess_metadata_json
+                    else None
+                ),
                 x1=row.x1,
                 y1=row.y1,
                 x2=row.x2,
@@ -573,6 +750,412 @@ def _audit_document(
     return document_summary, alignments
 
 
+def _split_name(document_id: str) -> str:
+    bucket = int(hashlib.sha256(document_id.encode("utf-8")).hexdigest()[:8], 16) % 100
+    if bucket < 80:
+        return "train"
+    if bucket < 90:
+        return "val"
+    return "test"
+
+
+def _entity_label(entity_type: str, field: str) -> str:
+    if entity_type == "note":
+        aliases = {
+            "issue_date": "NOTE_ISSUE_DATE",
+            "issue_place": "NOTE_ISSUE_PLACE",
+        }
+        return aliases.get(field, field.upper())
+    return field.upper()
+
+
+def _normalized_bbox(
+    bbox: tuple[int, int, int, int], width: int, height: int
+) -> list[int]:
+    if width <= 0 or height <= 0:
+        raise ValueError("Page dimensions must be positive.")
+    x1, y1, x2, y2 = bbox
+    if x1 < 0 or y1 < 0 or x2 <= x1 or y2 <= y1 or x2 > width or y2 > height:
+        raise ValueError(
+            f"BBox {bbox} is outside the processed image {width}x{height}."
+        )
+    normalized = [
+        round(x1 * 1000 / width),
+        round(y1 * 1000 / height),
+        round(x2 * 1000 / width),
+        round(y2 * 1000 / height),
+    ]
+    normalized[0] = max(0, min(999, normalized[0]))
+    normalized[1] = max(0, min(999, normalized[1]))
+    normalized[2] = max(normalized[0] + 1, min(1000, normalized[2]))
+    normalized[3] = max(normalized[1] + 1, min(1000, normalized[3]))
+    return normalized
+
+
+def _safe_ser_candidates(alignment: dict[str, Any]) -> list[dict[str, Any]]:
+    if alignment["status"] == "MATCHED" and alignment["chosen"]:
+        return [alignment["chosen"]]
+    if alignment["status"] != "AMBIGUOUS":
+        return []
+    # Repeated literal occurrences are all valid SER supervision. Fuzzy
+    # alternatives remain in the review queue and never become automatic labels.
+    return [
+        candidate
+        for candidate in alignment["candidates"]
+        if candidate["base_score"] >= 0.94
+        and candidate["method"].split("+", 1)[0] in {"exact", "contained"}
+    ]
+
+
+def _copy_or_reference_image(
+    token: AuditToken,
+    *,
+    storage: AnnotationStorage,
+    dataset_dir: Path,
+    copy_images: bool,
+) -> str:
+    if not copy_images:
+        return token.image_relative_path
+    source = storage.resolve(token.image_relative_path)
+    if not source.is_file():
+        raise FileNotFoundError(f"OCR review image was not found: {source}")
+    from PIL import Image
+
+    with Image.open(source) as image:
+        actual_size = image.size
+    expected_size = (token.page_width, token.page_height)
+    if actual_size != expected_size:
+        raise ValueError(
+            "OCR review image dimensions do not match its bbox coordinate system: "
+            f"actual={actual_size}, expected={expected_size}, path={source}"
+        )
+    suffix = source.suffix.lower() or ".png"
+    relative = Path("images") / token.page_id / f"page{suffix}"
+    destination = dataset_dir / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if not destination.exists() or destination.stat().st_size != source.stat().st_size:
+        shutil.copy2(source, destination)
+    return relative.as_posix()
+
+
+def _build_kie_dataset(
+    *,
+    document_summaries: list[dict[str, Any]],
+    alignments: list[dict[str, Any]],
+    case_tokens: dict[str, list[AuditToken]],
+    dataset_dir: Path,
+    storage: AnnotationStorage,
+    copy_images: bool,
+) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]], dict[str, Any]]:
+    alignment_by_case: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for alignment in alignments:
+        alignment_by_case[alignment["case_id"]].append(alignment)
+    summary_by_case = {item["case_id"]: item for item in document_summaries}
+
+    records_by_split: dict[str, list[dict[str, Any]]] = {
+        "train": [],
+        "val": [],
+        "test": [],
+    }
+    review_queue: list[dict[str, Any]] = []
+    label_names: set[str] = set()
+    relation_count = 0
+    auto_labeled_spans = 0
+    conflict_count = 0
+
+    for case_id, tokens in case_tokens.items():
+        document_summary = summary_by_case.get(case_id)
+        if document_summary is None:
+            continue
+        page_tokens: dict[str, list[AuditToken]] = defaultdict(list)
+        for token in tokens:
+            page_tokens[token.page_id].append(token)
+        page_alignments: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = defaultdict(list)
+        for alignment in alignment_by_case.get(case_id, []):
+            candidates = _safe_ser_candidates(alignment)
+            for candidate in candidates:
+                page_alignments[candidate["page_id"]].append((alignment, candidate))
+            if alignment["status"] in {"AMBIGUOUS", "NOT_FOUND"}:
+                review_queue.append(
+                    {
+                        "reason": alignment["status"],
+                        "case_id": case_id,
+                        "document_id": alignment["document_id"],
+                        "original_filename": alignment["original_filename"],
+                        "field_path": alignment["field_path"],
+                        "value": alignment["value"],
+                        "candidates": alignment["candidates"],
+                    }
+                )
+
+        for page_id, ordered_tokens in page_tokens.items():
+            ordered_tokens.sort(key=lambda item: item.token_order)
+            first = ordered_tokens[0]
+            token_index = {token.token_id: index for index, token in enumerate(ordered_tokens)}
+            labels = ["O"] * len(ordered_tokens)
+            ownership: dict[int, tuple[str, str, float]] = {}
+            entities: list[dict[str, Any]] = []
+            entity_signature: dict[tuple[str, tuple[int, ...]], str] = {}
+            entity_by_field_and_applicant: dict[tuple[str, int | None], list[str]] = defaultdict(list)
+
+            for alignment, candidate in sorted(
+                page_alignments.get(page_id, []),
+                key=lambda item: item[1]["selection_score"],
+                reverse=True,
+            ):
+                indices = sorted(
+                    token_index[token_id]
+                    for token_id in candidate["token_ids"]
+                    if token_id in token_index
+                )
+                if not indices:
+                    continue
+                label = _entity_label(alignment["entity_type"], alignment["field"])
+                label_names.add(label)
+                score = float(candidate["selection_score"])
+                signature = (label, tuple(indices))
+                existing_entity_id = entity_signature.get(signature)
+                if existing_entity_id is not None:
+                    existing = next(
+                        entity for entity in entities if entity["id"] == existing_entity_id
+                    )
+                    if existing["applicant_index"] != alignment["entity_index"]:
+                        existing["applicant_index"] = None
+                        existing["relation_ambiguous"] = True
+                        for mapped_ids in entity_by_field_and_applicant.values():
+                            if existing_entity_id in mapped_ids:
+                                mapped_ids.remove(existing_entity_id)
+                        review_queue.append(
+                            {
+                                "reason": "ENTITY_RELATION_AMBIGUOUS",
+                                "case_id": case_id,
+                                "document_id": alignment["document_id"],
+                                "original_filename": alignment["original_filename"],
+                                "field_path": alignment["field_path"],
+                                "value": alignment["value"],
+                                "candidate": candidate,
+                            }
+                        )
+                    continue
+                conflicts = [
+                    index
+                    for index in indices
+                    if index in ownership
+                    and ownership[index][0] != label
+                ]
+                if conflicts:
+                    conflict_count += 1
+                    review_queue.append(
+                        {
+                            "reason": "TOKEN_LABEL_CONFLICT",
+                            "case_id": case_id,
+                            "document_id": alignment["document_id"],
+                            "original_filename": alignment["original_filename"],
+                            "field_path": alignment["field_path"],
+                            "value": alignment["value"],
+                            "candidate": candidate,
+                            "conflicting_token_ids": [
+                                ordered_tokens[index].token_id for index in conflicts
+                            ],
+                        }
+                    )
+                    continue
+                entity_id = f"e{len(entities) + 1}"
+                for position, index in enumerate(indices):
+                    labels[index] = f"{'B' if position == 0 else 'I'}-{label}"
+                    ownership[index] = (label, alignment["field_path"], score)
+                entity = {
+                    "id": entity_id,
+                    "label": label,
+                    "field_path": alignment["field_path"],
+                    "entity_type": alignment["entity_type"],
+                    "applicant_index": alignment["entity_index"],
+                    "value": alignment["value"],
+                    "token_indices": indices,
+                    "token_ids": [ordered_tokens[index].token_id for index in indices],
+                    "bbox": candidate["bbox"],
+                    "bbox_normalized": _normalized_bbox(
+                        tuple(candidate["bbox"]), first.page_width, first.page_height
+                    ),
+                    "confidence": score,
+                    "label_source": (
+                        "AUTO_UNIQUE"
+                        if alignment["status"] == "MATCHED"
+                        else "AUTO_REPEATED_EXACT"
+                    ),
+                }
+                entities.append(entity)
+                entity_signature[signature] = entity_id
+                entity_by_field_and_applicant[
+                    (alignment["field"], alignment["entity_index"])
+                ].append(entity_id)
+                auto_labeled_spans += 1
+
+            relations: list[dict[str, Any]] = []
+            applicant_indices = sorted(
+                {
+                    entity["applicant_index"]
+                    for entity in entities
+                    if entity["entity_type"] == "applicant"
+                    and entity["applicant_index"] is not None
+                }
+            )
+            entity_lookup = {entity["id"]: entity for entity in entities}
+            for applicant_index in applicant_indices:
+                roots = entity_by_field_and_applicant.get(("full_name", applicant_index), [])
+                if not roots:
+                    roots = entity_by_field_and_applicant.get(
+                        ("passport_number", applicant_index), []
+                    )
+                # Relations are emitted only with a unique page-level person anchor.
+                if len(roots) != 1:
+                    continue
+                root = roots[0]
+                for entity in entities:
+                    if (
+                        entity["id"] != root
+                        and entity["entity_type"] == "applicant"
+                        and entity["applicant_index"] == applicant_index
+                        and entity["label_source"] == "AUTO_UNIQUE"
+                    ):
+                        relations.append(
+                            {
+                                "head": root,
+                                "tail": entity["id"],
+                                "type": "BELONGS_TO_APPLICANT",
+                                "applicant_index": applicant_index,
+                                "head_label": entity_lookup[root]["label"],
+                                "tail_label": entity["label"],
+                            }
+                        )
+            relation_count += len(relations)
+
+            try:
+                boxes = [
+                    _normalized_bbox(
+                        (token.x1, token.y1, token.x2, token.y2),
+                        token.page_width,
+                        token.page_height,
+                    )
+                    for token in ordered_tokens
+                ]
+                image_path = _copy_or_reference_image(
+                    first,
+                    storage=storage,
+                    dataset_dir=dataset_dir,
+                    copy_images=copy_images,
+                )
+            except (ValueError, FileNotFoundError) as exc:
+                review_queue.append(
+                    {
+                        "reason": "INVALID_PAGE_COORDINATES_OR_IMAGE",
+                        "case_id": case_id,
+                        "document_id": document_summary["document_id"],
+                        "original_filename": document_summary["original_filename"],
+                        "page_id": page_id,
+                        "page_number": first.page_number,
+                        "error": str(exc),
+                    }
+                )
+                continue
+
+            record = {
+                "id": f"{case_id}:{page_id}",
+                "case_id": case_id,
+                "document_id": document_summary["document_id"],
+                "original_filename": document_summary["original_filename"],
+                "page_id": page_id,
+                "page_number": first.page_number,
+                "page_order": first.page_order,
+                "image_path": image_path,
+                "image_storage_relative_path": first.image_relative_path,
+                "image_width": first.page_width,
+                "image_height": first.page_height,
+                "source_image_width": first.source_width,
+                "source_image_height": first.source_height,
+                "is_preprocessed": first.is_preprocessed,
+                "orientation_angle": first.orientation_angle,
+                "preprocess_metadata": first.preprocess_metadata,
+                "ocr_review_id": first.review_id,
+                "token_ids": [token.token_id for token in ordered_tokens],
+                "words": [token.text for token in ordered_tokens],
+                "boxes": boxes,
+                "pixel_boxes": [
+                    [token.x1, token.y1, token.x2, token.y2]
+                    for token in ordered_tokens
+                ],
+                "labels": labels,
+                "entities": entities,
+                "relations": relations,
+            }
+            records_by_split[_split_name(document_summary["document_id"])].append(record)
+
+    statistics = {
+        "dataset_version": "kie-ser-re-v1",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "counts_by_split": {
+            split: len(records) for split, records in records_by_split.items()
+        },
+        "document_count": len(
+            {
+                record["document_id"]
+                for records in records_by_split.values()
+                for record in records
+            }
+        ),
+        "page_count": sum(len(records) for records in records_by_split.values()),
+        "auto_labeled_spans": auto_labeled_spans,
+        "relations": relation_count,
+        "label_conflicts": conflict_count,
+        "review_queue_items": len(review_queue),
+        "labels": sorted(label_names),
+        "bbox_coordinate_system": {
+            "pixel_boxes": "OCR processed image pixels",
+            "boxes": "LayoutLM-compatible integer coordinates in [0, 1000]",
+            "image_contract": (
+                "image_path references the exact processed image used by the "
+                "approved OCR review"
+            ),
+        },
+    }
+    return records_by_split, review_queue, statistics
+
+
+def _write_kie_dataset(
+    *,
+    dataset_dir: Path,
+    records_by_split: dict[str, list[dict[str, Any]]],
+    review_queue: list[dict[str, Any]],
+    statistics: dict[str, Any],
+) -> None:
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    for split, records in records_by_split.items():
+        _write_jsonl(dataset_dir / f"{split}.jsonl", records)
+    _write_jsonl(dataset_dir / "review_queue.jsonl", review_queue)
+    (dataset_dir / "labels.json").write_text(
+        json.dumps(
+            {
+                "outside": "O",
+                "entity_labels": statistics["labels"],
+                "bio_labels": [
+                    label
+                    for entity_label in statistics["labels"]
+                    for label in (f"B-{entity_label}", f"I-{entity_label}")
+                ],
+                "relation_labels": ["BELONGS_TO_APPLICANT"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (dataset_dir / "dataset_statistics.json").write_text(
+        json.dumps(statistics, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _write_jsonl(path: Path, records: Iterable[dict[str, Any]]) -> None:
     with path.open("w", encoding="utf-8", newline="\n") as handle:
         for record in records:
@@ -585,31 +1168,33 @@ def _recommendation(status_counts: Counter[str]) -> dict[str, Any]:
     )
     matched = status_counts["MATCHED"]
     ambiguous = status_counts["AMBIGUOUS"]
+    not_found = status_counts["NOT_FOUND"]
+    grounded = matched + ambiguous
     match_rate = matched / direct_total if direct_total else 0.0
     ambiguity_rate = ambiguous / direct_total if direct_total else 0.0
-    if matched >= 500 and match_rate >= 0.75 and ambiguity_rate <= 0.15:
-        verdict = "READY_FOR_SER_RE_PILOT"
-        message = (
-            "Enough high-confidence grounded fields for a pilot SER/RE dataset. "
-            "Manually resolve AMBIGUOUS rows before final training export."
-        )
-    elif matched >= 250 and match_rate >= 0.5:
-        verdict = "NEEDS_TARGETED_ALIGNMENT_REVIEW"
-        message = (
-            "Useful seed data exists, but ambiguous/not-found fields need targeted "
-            "review or stronger row/person anchoring before training."
-        )
+    coverage = grounded / direct_total if direct_total else 0.0
+    if grounded >= 50 and coverage >= 0.9:
+        ser_verdict = "READY_FOR_SER_PILOT"
+    elif grounded >= 25 and coverage >= 0.7:
+        ser_verdict = "SER_NEEDS_TARGETED_REVIEW"
     else:
-        verdict = "NOT_READY_FOR_KIE_TRAINING"
-        message = (
-            "Too few direct fields are grounded reliably. Improve OCR reviews or "
-            "add entity-span review before training."
-        )
+        ser_verdict = "SER_NOT_READY"
+    if matched >= 500 and match_rate >= 0.75 and ambiguity_rate <= 0.15:
+        re_verdict = "READY_FOR_RE_PILOT"
+    else:
+        re_verdict = "RE_NEEDS_RELATION_REVIEW"
     return {
-        "verdict": verdict,
-        "message": message,
+        "ser_verdict": ser_verdict,
+        "re_verdict": re_verdict,
+        "message": (
+            "Repeated exact values are valid SER supervision, but RE edges are "
+            "exported only when a unique applicant anchor is available."
+        ),
         "direct_non_null_fields": direct_total,
         "matched_fields": matched,
+        "ambiguous_but_grounded_fields": ambiguous,
+        "not_found_fields": not_found,
+        "source_coverage": round(coverage, 6),
         "match_rate": round(match_rate, 6),
         "ambiguity_rate": round(ambiguity_rate, 6),
     }
@@ -704,10 +1289,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             else (PROJECT_ROOT / args.output_dir).resolve()
         )
         output_dir.mkdir(parents=True, exist_ok=True)
-        (output_dir / "summary.json").write_text(
-            json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
         _write_jsonl(output_dir / "documents.jsonl", document_summaries)
         _write_jsonl(output_dir / "alignments.jsonl", alignments)
         _write_jsonl(
@@ -723,6 +1304,33 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             (item for item in alignments if item["status"] == "NOT_FOUND"),
         )
         summary["output_dir"] = str(output_dir)
+
+        dataset_dir = (
+            args.dataset_dir.resolve()
+            if args.dataset_dir.is_absolute()
+            else (PROJECT_ROOT / args.dataset_dir).resolve()
+        )
+        storage = AnnotationStorage(settings.annotation_storage_path)
+        records_by_split, review_queue, dataset_statistics = _build_kie_dataset(
+            document_summaries=document_summaries,
+            alignments=alignments,
+            case_tokens=case_tokens,
+            dataset_dir=dataset_dir,
+            storage=storage,
+            copy_images=not args.no_copy_images,
+        )
+        _write_kie_dataset(
+            dataset_dir=dataset_dir,
+            records_by_split=records_by_split,
+            review_queue=review_queue,
+            statistics=dataset_statistics,
+        )
+        summary["dataset_dir"] = str(dataset_dir)
+        summary["dataset"] = dataset_statistics
+        (output_dir / "summary.json").write_text(
+            json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
 
     print("KIE alignment audit finished:")
     print(json.dumps(summary, ensure_ascii=False, indent=2))

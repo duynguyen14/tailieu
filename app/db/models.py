@@ -804,3 +804,133 @@ class TableStructureElement(Base):
     )
 
     table_region: Mapped[TableRegion] = relationship(back_populates="elements")
+
+
+class KieAnnotationRun(Base):
+    __tablename__ = "kie_annotation_runs"
+    __table_args__ = (
+        CheckConstraint("status IN ('GENERATED', 'IN_REVIEW', 'COMPLETED')", name="ck_kie_run_status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    teacher_review_id: Mapped[str] = mapped_column(ForeignKey("teacher_extraction_reviews.id"), nullable=False, index=True)
+    case_id: Mapped[str] = mapped_column(ForeignKey("document_cases.id"), nullable=False, index=True)
+    document_id: Mapped[str] = mapped_column(ForeignKey("annotation_documents.id"), nullable=False, index=True)
+    algorithm_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    source_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="GENERATED", index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+
+class KiePageAnnotation(Base):
+    __tablename__ = "kie_page_annotations"
+    __table_args__ = (
+        UniqueConstraint("run_id", "page_id", name="uq_kie_page_run_page"),
+        CheckConstraint("ser_status IN ('PENDING', 'APPROVED')", name="ck_kie_page_ser_status"),
+        CheckConstraint("re_status IN ('BLOCKED', 'PENDING', 'APPROVED')", name="ck_kie_page_re_status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("kie_annotation_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    page_id: Mapped[str] = mapped_column(ForeignKey("annotation_pages.id"), nullable=False, index=True)
+    ocr_review_id: Mapped[str] = mapped_column(ForeignKey("ocr_reviews.id"), nullable=False, index=True)
+    page_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    page_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    image_relative_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    image_width: Mapped[int] = mapped_column(Integer, nullable=False)
+    image_height: Mapped[int] = mapped_column(Integer, nullable=False)
+    orientation_angle: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    preprocess_metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ser_status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING", index=True)
+    re_status: Mapped[str] = mapped_column(String(20), nullable=False, default="BLOCKED", index=True)
+    ser_reviewed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    re_reviewed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    ser_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    re_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+
+class KieFieldProposal(Base):
+    __tablename__ = "kie_field_proposals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("kie_annotation_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    field_path: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    entity_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    entity_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    field_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    expected_value: Mapped[str | None] = mapped_column(Unicode(), nullable=True)
+    match_status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    chosen_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    candidates_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class KieEntityAnnotation(Base):
+    __tablename__ = "kie_entity_annotations"
+    __table_args__ = (
+        CheckConstraint("x1 >= 0 AND y1 >= 0 AND x2 > x1 AND y2 > y1", name="ck_kie_entity_bbox"),
+        CheckConstraint("nx1 >= 0 AND ny1 >= 0 AND nx2 <= 1000 AND ny2 <= 1000 AND nx2 > nx1 AND ny2 > ny1", name="ck_kie_entity_normalized_bbox"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    page_annotation_id: Mapped[str] = mapped_column(ForeignKey("kie_page_annotations.id", ondelete="CASCADE"), nullable=False, index=True)
+    parent_entity_id: Mapped[str | None] = mapped_column(ForeignKey("kie_entity_annotations.id"), nullable=True)
+    field_proposal_id: Mapped[str | None] = mapped_column(ForeignKey("kie_field_proposals.id"), nullable=True, index=True)
+    entity_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    label: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    value: Mapped[str] = mapped_column(Unicode(), nullable=False)
+    field_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    applicant_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    token_ids_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    x1: Mapped[int] = mapped_column(Integer, nullable=False)
+    y1: Mapped[int] = mapped_column(Integer, nullable=False)
+    x2: Mapped[int] = mapped_column(Integer, nullable=False)
+    y2: Mapped[int] = mapped_column(Integer, nullable=False)
+    nx1: Mapped[int] = mapped_column(Integer, nullable=False)
+    ny1: Mapped[int] = mapped_column(Integer, nullable=False)
+    nx2: Mapped[int] = mapped_column(Integer, nullable=False)
+    ny2: Mapped[int] = mapped_column(Integer, nullable=False)
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="MODEL")
+    candidate_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+
+class KieRelationAnnotation(Base):
+    __tablename__ = "kie_relation_annotations"
+    __table_args__ = (CheckConstraint("head_entity_id <> tail_entity_id", name="ck_kie_relation_not_self"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    page_annotation_id: Mapped[str] = mapped_column(ForeignKey("kie_page_annotations.id", ondelete="CASCADE"), nullable=False, index=True)
+    parent_relation_id: Mapped[str | None] = mapped_column(ForeignKey("kie_relation_annotations.id"), nullable=True)
+    head_entity_id: Mapped[str] = mapped_column(ForeignKey("kie_entity_annotations.id"), nullable=False, index=True)
+    tail_entity_id: Mapped[str] = mapped_column(ForeignKey("kie_entity_annotations.id"), nullable=False, index=True)
+    relation_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    applicant_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="MODEL")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+
+class KieAnnotationReview(Base):
+    __tablename__ = "kie_annotation_reviews"
+    __table_args__ = (CheckConstraint("mode IN ('SER', 'RE')", name="ck_kie_review_mode"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    page_annotation_id: Mapped[str] = mapped_column(ForeignKey("kie_page_annotations.id", ondelete="CASCADE"), nullable=False, index=True)
+    parent_review_id: Mapped[str | None] = mapped_column(ForeignKey("kie_annotation_reviews.id"), nullable=True)
+    mode: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewed_by: Mapped[str] = mapped_column(String(100), nullable=False)
+    review_note: Mapped[str | None] = mapped_column(Unicode(), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)

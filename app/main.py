@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.annotation_routes import router as annotation_router
 from app.api.ocr_review_routes import router as ocr_review_router
+from app.api.kie_review_routes import router as kie_review_router
 from app.api.page_label_audit_routes import router as page_label_audit_router
 from app.api.routes import router
 from app.api.table_annotation_routes import router as table_annotation_router
@@ -19,6 +20,7 @@ from app.db.database import Database
 from app.models.factory import build_model_bundle
 from app.services.annotation import AnnotationService
 from app.services.ocr_review import OcrReviewService
+from app.services.kie_review import KieReviewService
 from app.services.page_label_audit import PageLabelAuditService
 from app.services.pdf_renderer import PdfRenderer
 from app.services.pipeline import DocumentPipeline
@@ -69,6 +71,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         database=database,
         ocr_review_service=ocr_review_service,
     )
+    kie_review_service = KieReviewService(database=database, storage=annotation_storage)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -111,6 +114,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.ocr_review_service = ocr_review_service
     app.state.text_reconstruction_review_service = text_reconstruction_review_service
     app.state.teacher_extraction_review_service = teacher_extraction_review_service
+    app.state.kie_review_service = kie_review_service
     app.include_router(router, prefix=settings.api_prefix)
     app.include_router(annotation_router, prefix=settings.api_prefix)
     app.include_router(page_label_audit_router, prefix=settings.api_prefix)
@@ -118,6 +122,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(table_annotation_router, prefix=settings.api_prefix)
     app.include_router(text_reconstruction_router, prefix=settings.api_prefix)
     app.include_router(teacher_extraction_router, prefix=settings.api_prefix)
+    app.include_router(kie_review_router, prefix=settings.api_prefix)
     return app
 
 
