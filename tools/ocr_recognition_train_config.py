@@ -40,6 +40,7 @@ class OcrRecognitionTrainSettings(BaseSettings):
     ocr_train_gpu_device_id: int = Field(default=0, ge=0)
     ocr_train_epochs: int = Field(default=50, ge=1, le=1000)
     ocr_train_batch_size: int = Field(default=64, ge=1, le=2048)
+    ocr_train_eval_batch_size: int = Field(default=1, ge=1, le=64)
     ocr_train_num_workers: int = Field(default=4, ge=0, le=64)
     ocr_train_learning_rate: float = Field(default=0.0001, gt=0.0, le=1.0)
     ocr_train_max_text_length: int = Field(default=160, ge=1, le=2048)

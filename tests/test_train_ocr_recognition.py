@@ -72,6 +72,7 @@ def test_build_training_config_overrides_dataset_and_model_shape(tmp_path) -> No
         device="gpu",
         epochs=50,
         batch_size=64,
+        eval_batch_size=1,
         workers=2,
         learning_rate=0.0001,
         max_text_length=160,
@@ -87,6 +88,7 @@ def test_build_training_config_overrides_dataset_and_model_shape(tmp_path) -> No
     assert result["Global"]["max_text_length"] == 160
     assert result["Train"]["dataset"]["data_dir"] == str(tmp_path)
     assert result["Train"]["sampler"]["first_bs"] == 64
+    assert result["Eval"]["loader"]["batch_size_per_card"] == 1
     assert result["Train"]["sampler"]["scales"][1] == [640, 48]
     assert result["Eval"]["dataset"]["label_file_list"] == [
         str(tmp_path / "val.txt")

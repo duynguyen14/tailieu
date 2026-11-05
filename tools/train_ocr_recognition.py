@@ -289,6 +289,7 @@ def build_training_config(
     device: str,
     epochs: int,
     batch_size: int,
+    eval_batch_size: int,
     workers: int,
     learning_rate: float,
     max_text_length: int,
@@ -348,7 +349,10 @@ def build_training_config(
     evaluation = base["Eval"]
     evaluation["dataset"]["data_dir"] = str(dataset.dataset_dir)
     evaluation["dataset"]["label_file_list"] = [str(dataset.val_labels)]
-    evaluation["loader"]["batch_size_per_card"] = batch_size
+    # The official PP-OCRv5 config uses eval_mode=True, which produces
+    # variable-width tensors. They cannot be stacked into batches larger than
+    # one by Paddle's default collate function.
+    evaluation["loader"]["batch_size_per_card"] = eval_batch_size
     evaluation["loader"]["num_workers"] = workers
     eval_transforms = evaluation["dataset"]["transforms"]
     _set_transform_value(
@@ -484,6 +488,7 @@ def run(args: argparse.Namespace) -> None:
         device=device,
         epochs=epochs,
         batch_size=batch_size,
+        eval_batch_size=settings.ocr_train_eval_batch_size,
         workers=settings.ocr_train_num_workers,
         learning_rate=settings.ocr_train_learning_rate,
         max_text_length=max_text_length,
@@ -512,6 +517,7 @@ def run(args: argparse.Namespace) -> None:
         "device": device,
         "epochs": epochs,
         "batch_size": batch_size,
+        "eval_batch_size": settings.ocr_train_eval_batch_size,
         "max_text_length": max_text_length,
         "image_shape": [3, settings.ocr_train_image_height, settings.ocr_train_image_width],
         "dataset_counts": {
