@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import os
 import subprocess
@@ -383,6 +384,7 @@ def run_worker(settings: StudentExtractorTrainSettings) -> None:
         from peft import LoraConfig, get_peft_model
         from torch.utils.data import Dataset
         from transformers import (
+            __version__ as transformers_version,
             AutoModelForCausalLM,
             AutoTokenizer,
             EarlyStoppingCallback,
@@ -472,9 +474,12 @@ def run_worker(settings: StudentExtractorTrainSettings) -> None:
         "fp16": torch.float16,
         "fp32": torch.float32,
     }[precision]
-    model = AutoModelForCausalLM.from_pretrained(
-        model_source, torch_dtype=torch_dtype, **common_load_options
-    )
+    transformers_major_version = int(transformers_version.split(".", maxsplit=1)[0])
+    model_load_options = dict(common_load_options)
+    model_load_options[
+        "dtype" if transformers_major_version >= 5 else "torch_dtype"
+    ] = torch_dtype
+    model = AutoModelForCausalLM.from_pretrained(model_source, **model_load_options)
     model.config.use_cache = False
     lora_config = LoraConfig(
         r=settings.student_train_lora_rank,
@@ -503,38 +508,63 @@ def run_worker(settings: StudentExtractorTrainSettings) -> None:
             f"{trainable_parameters:,}/{total_parameters:,}"
         )
         model.print_trainable_parameters()
-    training_arguments = TrainingArguments(
-        output_dir=str(settings.output_path),
-        overwrite_output_dir=settings.student_train_overwrite_output,
-        num_train_epochs=settings.student_train_epochs,
-        per_device_train_batch_size=settings.student_train_batch_size,
-        per_device_eval_batch_size=settings.student_train_eval_batch_size,
-        gradient_accumulation_steps=settings.student_train_gradient_accumulation_steps,
-        learning_rate=settings.student_train_learning_rate,
-        weight_decay=settings.student_train_weight_decay,
-        warmup_ratio=settings.student_train_warmup_ratio,
-        lr_scheduler_type="cosine",
-        logging_strategy="steps",
-        logging_steps=1,
-        eval_strategy="epoch",
-        save_strategy="epoch",
-        save_total_limit=settings.student_train_save_total_limit,
-        load_best_model_at_end=True,
-        metric_for_best_model="eval_loss",
-        greater_is_better=False,
-        bf16=precision == "bf16",
-        fp16=precision == "fp16",
-        tf32=use_cuda,
-        gradient_checkpointing=settings.student_train_gradient_checkpointing,
-        dataloader_num_workers=settings.student_train_num_workers,
-        ddp_find_unused_parameters=False if world_size > 1 else None,
-        report_to="none",
-        remove_unused_columns=False,
-        optim="adamw_torch",
-        seed=settings.student_train_seed,
-        data_seed=settings.student_train_seed,
-        save_safetensors=True,
+    training_argument_options: dict[str, Any] = {
+        "output_dir": str(settings.output_path),
+        "num_train_epochs": settings.student_train_epochs,
+        "per_device_train_batch_size": settings.student_train_batch_size,
+        "per_device_eval_batch_size": settings.student_train_eval_batch_size,
+        "gradient_accumulation_steps": (
+            settings.student_train_gradient_accumulation_steps
+        ),
+        "learning_rate": settings.student_train_learning_rate,
+        "weight_decay": settings.student_train_weight_decay,
+        "lr_scheduler_type": "cosine",
+        "logging_strategy": "steps",
+        "logging_steps": 1,
+        "eval_strategy": "epoch",
+        "save_strategy": "epoch",
+        "save_total_limit": settings.student_train_save_total_limit,
+        "load_best_model_at_end": True,
+        "metric_for_best_model": "eval_loss",
+        "greater_is_better": False,
+        "bf16": precision == "bf16",
+        "fp16": precision == "fp16",
+        "tf32": use_cuda,
+        "gradient_checkpointing": settings.student_train_gradient_checkpointing,
+        "dataloader_num_workers": settings.student_train_num_workers,
+        "ddp_find_unused_parameters": False if world_size > 1 else None,
+        "report_to": "none",
+        "remove_unused_columns": False,
+        "optim": "adamw_torch",
+        "seed": settings.student_train_seed,
+        "data_seed": settings.student_train_seed,
+    }
+    training_argument_parameters = inspect.signature(
+        TrainingArguments.__init__
+    ).parameters
+    if "overwrite_output_dir" in training_argument_parameters:
+        training_argument_options["overwrite_output_dir"] = (
+            settings.student_train_overwrite_output
+        )
+    if "warmup_ratio" in training_argument_parameters:
+        training_argument_options["warmup_ratio"] = (
+            settings.student_train_warmup_ratio
+        )
+    else:
+        training_argument_options["warmup_steps"] = (
+            settings.student_train_warmup_ratio
+        )
+    if "save_safetensors" in training_argument_parameters:
+        training_argument_options["save_safetensors"] = True
+    unsupported_arguments = sorted(
+        set(training_argument_options) - set(training_argument_parameters)
     )
+    if unsupported_arguments:
+        raise RuntimeError(
+            f"Transformers {transformers_version} has unsupported TrainingArguments: "
+            f"{', '.join(unsupported_arguments)}"
+        )
+    training_arguments = TrainingArguments(**training_argument_options)
     callbacks = []
     if settings.student_train_early_stopping_patience:
         callbacks.append(
@@ -591,7 +621,11 @@ def merge_adapter(settings: StudentExtractorTrainSettings) -> None:
     try:
         import torch
         from peft import PeftModel
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import (
+            __version__ as transformers_version,
+            AutoModelForCausalLM,
+            AutoTokenizer,
+        )
     except ImportError as error:
         raise RuntimeError(
             "Student training dependencies are missing; cannot merge the adapter"
@@ -602,12 +636,15 @@ def merge_adapter(settings: StudentExtractorTrainSettings) -> None:
     model_source = str(settings.model_path or settings.student_train_model_id)
     token = os.getenv("HF_TOKEN") or None
     use_cuda = settings.student_train_device == "gpu" and torch.cuda.is_available()
+    transformers_major_version = int(transformers_version.split(".", maxsplit=1)[0])
     load_options: dict[str, Any] = {
         "token": token,
         "local_files_only": settings.student_train_offline,
         "trust_remote_code": False,
-        "torch_dtype": torch.float16 if use_cuda else torch.float32,
     }
+    load_options[
+        "dtype" if transformers_major_version >= 5 else "torch_dtype"
+    ] = torch.float16 if use_cuda else torch.float32
     if use_cuda:
         load_options["device_map"] = {"": 0}
     base_model = AutoModelForCausalLM.from_pretrained(model_source, **load_options)
@@ -615,7 +652,8 @@ def merge_adapter(settings: StudentExtractorTrainSettings) -> None:
     merged_model = adapter_model.merge_and_unload()
     merged_model.config.use_cache = True
     merged_path = settings.output_path / "merged_model"
-    merged_model.save_pretrained(merged_path, safe_serialization=True)
+    # Safetensors is the default in Transformers v4 and mandatory in v5.
+    merged_model.save_pretrained(merged_path)
     tokenizer = AutoTokenizer.from_pretrained(
         str(adapter_path),
         token=token,
