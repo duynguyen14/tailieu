@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from app.schemas.teacher_extraction import (
     TeacherExtractionReviewDetail,
@@ -35,9 +35,28 @@ def teacher_extraction_statistics(request: Request) -> TeacherExtractionReviewSt
 )
 def get_next_teacher_extraction_review(
     request: Request,
+    from_index: int | None = Query(default=None, ge=0),
+    to_index: int | None = Query(default=None, ge=0),
 ) -> TeacherExtractionReviewQueueResponse:
-    current, stats = _service(request).get_next_review()
-    return TeacherExtractionReviewQueueResponse(current=current, stats=stats)
+    if (from_index is None) != (to_index is None):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="from_index and to_index must be supplied together.",
+        )
+    if from_index is not None and to_index is not None and to_index < from_index:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="to_index must be greater than or equal to from_index.",
+        )
+    current, stats, current_index = _service(request).get_next_review(
+        from_index=from_index,
+        to_index=to_index,
+    )
+    return TeacherExtractionReviewQueueResponse(
+        current=current,
+        current_index=current_index,
+        stats=stats,
+    )
 
 
 @router.get("/{review_id}", response_model=TeacherExtractionReviewDetail)

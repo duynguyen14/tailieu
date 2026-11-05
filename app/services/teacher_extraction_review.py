@@ -65,30 +65,93 @@ class TeacherExtractionReviewService:
 
     def get_next_review(
         self,
+        *,
+        from_index: int | None = None,
+        to_index: int | None = None,
     ) -> tuple[
         TeacherExtractionReviewDetail | None,
         TeacherExtractionReviewStats,
+        int | None,
     ]:
         with self._database.session() as session:
             stats = self._statistics(session)
-            review = session.scalar(
-                self._detail_statement()
-                .join(
-                    TeacherExtractionJob,
-                    TeacherExtractionJob.id == TeacherExtractionReview.job_id,
-                )
+            current_index: int | None = None
+            active_review_exists = (
+                select(TeacherExtractionReview.id)
                 .where(
+                    TeacherExtractionReview.job_id == TeacherExtractionJob.id,
                     TeacherExtractionReview.is_active == true(),
-                    TeacherExtractionReview.review_status == "PENDING",
+                )
+                .exists()
+            )
+            ordered_jobs = (
+                select(TeacherExtractionJob.id)
+                .where(
                     TeacherExtractionJob.is_active == true(),
+                    active_review_exists,
                 )
                 .order_by(
-                    TeacherExtractionReview.created_at.asc(),
-                    TeacherExtractionReview.id.asc(),
+                    TeacherExtractionJob.created_at.asc(),
+                    TeacherExtractionJob.id.asc(),
                 )
-                .limit(1)
             )
-            return self._detail(session, review) if review is not None else None, stats
+
+            if from_index is not None and to_index is not None:
+                # Rank immutable jobs before filtering their current review
+                # status. Saving a new review version must not shift another
+                # reviewer's manually assigned interval.
+                range_job_ids = list(
+                    session.scalars(
+                        ordered_jobs
+                        .offset(from_index)
+                        .limit(to_index - from_index + 1)
+                    ).all()
+                )
+                review = None
+                if range_job_ids:
+                    review = session.scalar(
+                        self._detail_statement()
+                        .join(
+                            TeacherExtractionJob,
+                            TeacherExtractionJob.id == TeacherExtractionReview.job_id,
+                        )
+                        .where(
+                            TeacherExtractionReview.is_active == true(),
+                            TeacherExtractionReview.review_status == "PENDING",
+                            TeacherExtractionJob.is_active == true(),
+                            TeacherExtractionJob.id.in_(range_job_ids),
+                        )
+                        .order_by(
+                            TeacherExtractionJob.created_at.asc(),
+                            TeacherExtractionJob.id.asc(),
+                        )
+                        .limit(1)
+                    )
+                    if review is not None:
+                        current_index = from_index + range_job_ids.index(review.job_id)
+            else:
+                review = session.scalar(
+                    self._detail_statement()
+                    .join(
+                        TeacherExtractionJob,
+                        TeacherExtractionJob.id == TeacherExtractionReview.job_id,
+                    )
+                    .where(
+                        TeacherExtractionReview.is_active == true(),
+                        TeacherExtractionReview.review_status == "PENDING",
+                        TeacherExtractionJob.is_active == true(),
+                    )
+                    .order_by(
+                        TeacherExtractionJob.created_at.asc(),
+                        TeacherExtractionJob.id.asc(),
+                    )
+                    .limit(1)
+                )
+            return (
+                self._detail(session, review) if review is not None else None,
+                stats,
+                current_index,
+            )
 
     def get_detail(self, review_id: str) -> TeacherExtractionReviewDetail:
         with self._database.session() as session:

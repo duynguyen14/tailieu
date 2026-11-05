@@ -242,4 +242,5 @@ class TeacherExtractionReviewStats(BaseModel):
 
 class TeacherExtractionReviewQueueResponse(BaseModel):
     current: TeacherExtractionReviewDetail | None
+    current_index: int | None = Field(default=None, ge=0)
     stats: TeacherExtractionReviewStats

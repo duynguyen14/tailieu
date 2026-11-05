@@ -284,6 +284,27 @@ def test_teacher_extraction_review_versions_json_and_updates_queue() -> None:
         assert queued_payload["current"]["review"]["id"] == review_id
         assert queued_payload["current"]["case"]["original_filename"] == "teacher.pdf"
         assert queued_payload["current"]["attempt"]["latency_ms"] == 1200
+        assert queued_payload["current_index"] is None
+
+        ranged = client.get(
+            "/api/v1/teacher-extraction/review/next",
+            params={"from_index": 0, "to_index": 0},
+        )
+        assert ranged.status_code == 200
+        assert ranged.json()["current"]["review"]["id"] == review_id
+        assert ranged.json()["current_index"] == 0
+        assert client.get(
+            "/api/v1/teacher-extraction/review/next",
+            params={"from_index": 1, "to_index": 1},
+        ).json()["current"] is None
+        assert client.get(
+            "/api/v1/teacher-extraction/review/next",
+            params={"from_index": 0},
+        ).status_code == 400
+        assert client.get(
+            "/api/v1/teacher-extraction/review/next",
+            params={"from_index": 2, "to_index": 1},
+        ).status_code == 400
 
         with client.app.state.database.session() as session:
             job = session.get(TeacherExtractionJob, job_id)
@@ -328,6 +349,12 @@ def test_teacher_extraction_review_versions_json_and_updates_queue() -> None:
             saved_payload["reviewed_output"]["applicants"][0]["number_of_entries"]
             == "MULTIPLE"
         )
+        ranged_saved = client.get(
+            "/api/v1/teacher-extraction/review/next",
+            params={"from_index": 0, "to_index": 0},
+        ).json()
+        assert ranged_saved["current"]["review"]["id"] == saved_id
+        assert ranged_saved["current_index"] == 0
 
         approved = client.put(
             f"/api/v1/teacher-extraction/{saved_id}/review",
