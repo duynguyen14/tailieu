@@ -67,6 +67,8 @@ def run(args):
             summary["discovered"] = len(reviews)
             tokens_by_case = _load_case_tokens(session, sorted({review.job.case_id for review in reviews}))
             for position, review in enumerate(reviews, start=1):
+                review_id = review.id
+                original_filename = review.job.document.original_filename
                 try:
                     tokens = tokens_by_case.get(review.job.case_id, [])
                     source_hash = _source_hash(review.id, tokens, args)
@@ -117,9 +119,14 @@ def run(args):
                         session.add(page_annotation)
                         pages[page_id] = page_annotation
                     session.flush()
-                    entity_rows = []
+                    # Flush proposals before entities. The entity mapper stores
+                    # only the proposal UUID (no ORM relationship), therefore
+                    # SQLAlchemy's unit-of-work cannot reliably order these two
+                    # bulk INSERTs for SQL Server by itself.
+                    proposal_ids: dict[str, str] = {}
                     for alignment in alignments:
                         proposal_id = str(uuid4())
+                        proposal_ids[alignment["field_path"]] = proposal_id
                         session.add(KieFieldProposal(
                             id=proposal_id, run_id=run_id, field_path=alignment["field_path"],
                             entity_type=alignment["entity_type"], entity_index=alignment["entity_index"],
@@ -128,6 +135,11 @@ def run(args):
                             chosen_json=json.dumps(alignment["chosen"], ensure_ascii=False) if alignment["chosen"] else None,
                             candidates_json=json.dumps(alignment["candidates"], ensure_ascii=False),
                         ))
+                    session.flush()
+
+                    entity_rows = []
+                    for alignment in alignments:
+                        proposal_id = proposal_ids[alignment["field_path"]]
                         for rank, candidate in enumerate(alignment["candidates"], start=1):
                             page = pages.get(candidate["page_id"])
                             if page is None:
@@ -178,7 +190,10 @@ def run(args):
                     print(f"[{position}/{len(reviews)}] CREATED file='{document_summary['original_filename']}' pages={len(pages)} proposals={len(alignments)} entities={len(entity_rows)} relations={relation_count}")
                 except Exception as exc:
                     summary["failed"] += 1
-                    print(f"[{position}/{len(reviews)}] FAILED review={review.id}: {exc}")
+                    print(
+                        f"[{position}/{len(reviews)}] FAILED "
+                        f"file='{original_filename}' review={review_id}: {exc}"
+                    )
                     raise
     finally:
         database.close()
