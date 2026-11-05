@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -544,7 +544,7 @@ def run_worker(settings: StudentExtractorTrainSettings) -> None:
     trainer.save_state()
     if trainer.is_world_process_zero():
         summary = {
-            "created_at": datetime.now(UTC).isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "model_source": model_source,
             "schema_version": STUDENT_SCHEMA_VERSION,
             "dataset_counts": dataset_summary.counts,
@@ -606,7 +606,7 @@ def merge_adapter(settings: StudentExtractorTrainSettings) -> None:
     (merged_path / "merge_metadata.json").write_text(
         json.dumps(
             {
-                "created_at": datetime.now(UTC).isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
                 "base_model": model_source,
                 "adapter": str(adapter_path),
                 "schema_version": STUDENT_SCHEMA_VERSION,
