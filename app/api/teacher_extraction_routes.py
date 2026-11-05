@@ -6,6 +6,7 @@ from app.schemas.teacher_extraction import (
     TeacherExtractionReviewDetail,
     TeacherExtractionReviewQueueResponse,
     TeacherExtractionReviewRequest,
+    TeacherExtractionReviewSaveResponse,
     TeacherExtractionReviewStats,
 )
 from app.services.teacher_extraction_review import (
@@ -52,12 +53,12 @@ def get_teacher_extraction_review(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
-@router.put("/{review_id}/review", response_model=TeacherExtractionReviewDetail)
+@router.put("/{review_id}/review", response_model=TeacherExtractionReviewSaveResponse)
 def review_teacher_extraction(
     request: Request,
     review_id: str,
     payload: TeacherExtractionReviewRequest,
-) -> TeacherExtractionReviewDetail:
+) -> TeacherExtractionReviewSaveResponse:
     try:
         return _service(request).review(review_id=review_id, payload=payload)
     except TeacherExtractionReviewNotFoundError as exc:

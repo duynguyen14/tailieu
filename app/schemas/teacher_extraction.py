@@ -172,6 +172,11 @@ class TeacherExtractionReviewInfo(BaseModel):
     updated_at: datetime
 
 
+class TeacherExtractionReviewSaveResponse(BaseModel):
+    review: TeacherExtractionReviewInfo
+    reviewed_output: dict[str, Any]
+
+
 class TeacherExtractionJobInfo(BaseModel):
     id: str
     reconstruction_id: str

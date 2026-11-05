@@ -23,6 +23,7 @@ from app.schemas.teacher_extraction import (
     TeacherExtractionReviewDetail,
     TeacherExtractionReviewInfo,
     TeacherExtractionReviewRequest,
+    TeacherExtractionReviewSaveResponse,
     TeacherExtractionReviewStats,
     TeacherStudentTrainingPreview,
 )
@@ -105,7 +106,7 @@ class TeacherExtractionReviewService:
         *,
         review_id: str,
         payload: TeacherExtractionReviewRequest,
-    ) -> TeacherExtractionReviewDetail:
+    ) -> TeacherExtractionReviewSaveResponse:
         reviewer = payload.reviewed_by.strip()
         if not reviewer:
             raise TeacherExtractionReviewValidationError(
@@ -168,17 +169,20 @@ class TeacherExtractionReviewService:
             )
             session.add(replacement)
             session.flush()
-            session.expire_all()
-            stored = session.scalar(
-                self._detail_statement().where(
-                    TeacherExtractionReview.id == replacement.id
-                )
+            return TeacherExtractionReviewSaveResponse(
+                review=TeacherExtractionReviewInfo(
+                    id=replacement.id,
+                    parent_review_id=replacement.parent_review_id,
+                    review_status=replacement.review_status,
+                    is_active=replacement.is_active,
+                    reviewed_by=replacement.reviewed_by,
+                    review_note=replacement.review_note,
+                    reviewed_at=replacement.reviewed_at,
+                    created_at=replacement.created_at,
+                    updated_at=replacement.updated_at,
+                ),
+                reviewed_output=reviewed_output,
             )
-            if stored is None:
-                raise TeacherExtractionReviewConflictError(
-                    "SQL Server did not persist the new review version."
-                )
-            return self._detail(session, stored)
 
     @staticmethod
     def _detail_statement():
