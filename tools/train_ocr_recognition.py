@@ -13,7 +13,10 @@ import httpx
 import yaml
 
 from app.core.config import PROJECT_ROOT
-from tools.ocr_recognition_train_config import OcrRecognitionTrainSettings
+from tools.ocr_recognition_train_config import (
+    OcrRecognitionTrainSettings,
+    parse_gpu_device_ids,
+)
 
 
 @dataclass(frozen=True)
@@ -39,6 +42,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset-dir", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--device", choices=("gpu", "cpu"), default=None)
+    parser.add_argument(
+        "--gpus",
+        default=None,
+        help=(
+            "Comma-separated physical GPU IDs. Multiple IDs use Paddle "
+            "Distributed on Linux, for example: --gpus 2,3,4."
+        ),
+    )
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--checkpoint", type=Path, default=None)
@@ -290,6 +301,7 @@ def build_training_config(
     epochs: int,
     batch_size: int,
     eval_batch_size: int,
+    distributed: bool,
     workers: int,
     learning_rate: float,
     max_text_length: int,
@@ -312,7 +324,7 @@ def build_training_config(
             "save_inference_dir": str(output_dir / "inference"),
             "character_dict_path": str(character_dict_path),
             "max_text_length": max_text_length,
-            "distributed": False,
+            "distributed": distributed,
             "use_visualdl": use_visualdl,
             "save_res_path": str(output_dir / "predicts.txt"),
             "d2s_train_image_shape": [3, image_height, image_width],
@@ -367,7 +379,31 @@ def build_training_config(
     return base
 
 
-def check_paddle_runtime(device: str) -> None:
+def build_train_command(
+    repository: Path,
+    generated_config_path: Path,
+    output_dir: Path,
+    gpu_device_ids: tuple[int, ...],
+) -> list[str]:
+    paddle_script = [
+        str(PROJECT_ROOT / "tools" / "paddleocr_entrypoint.py"),
+        str(repository / "tools" / "train.py"),
+        "-c",
+        str(generated_config_path),
+    ]
+    if len(gpu_device_ids) <= 1:
+        return [sys.executable, *paddle_script]
+    return [
+        sys.executable,
+        "-m",
+        "paddle.distributed.launch",
+        f"--log_dir={output_dir / 'distributed_logs'}",
+        f"--gpus={','.join(str(device_id) for device_id in gpu_device_ids)}",
+        *paddle_script,
+    ]
+
+
+def check_paddle_runtime(device: str, gpu_device_ids: tuple[int, ...]) -> None:
     code = (
         "import paddle; "
         "print('Paddle:', paddle.__version__); "
@@ -388,6 +424,19 @@ def check_paddle_runtime(device: str) -> None:
         raise RuntimeError(
             "OCR_TRAIN_DEVICE=gpu but the active Paddle installation has no CUDA."
         )
+    if device == "gpu":
+        gpu_count_line = next(
+            (line for line in result.stdout.splitlines() if line.startswith("GPU count:")),
+            None,
+        )
+        if gpu_count_line is None:
+            raise RuntimeError("Paddle runtime did not report a GPU count")
+        gpu_count = int(gpu_count_line.split(":", 1)[1].strip())
+        invalid = [device_id for device_id in gpu_device_ids if device_id >= gpu_count]
+        if invalid:
+            raise RuntimeError(
+                f"Requested GPU IDs do not exist: {invalid}; detected {gpu_count} GPU(s)."
+            )
 
 
 def run(args: argparse.Namespace) -> None:
@@ -403,6 +452,20 @@ def run(args: argparse.Namespace) -> None:
         else settings.output_path
     )
     device = args.device or settings.ocr_train_device
+    gpu_device_ids = (
+        parse_gpu_device_ids(args.gpus)
+        if args.gpus is not None
+        else settings.gpu_device_ids
+    )
+    if device == "cpu":
+        gpu_device_ids = ()
+    elif not gpu_device_ids:
+        raise RuntimeError("GPU training requires at least one GPU device ID")
+    if len(gpu_device_ids) > 1 and os.name == "nt":
+        raise RuntimeError(
+            "PaddleOCR multi-GPU training is supported by this tool on Linux only."
+        )
+    distributed = device == "gpu" and len(gpu_device_ids) > 1
     batch_size = args.batch_size or settings.ocr_train_batch_size
     epochs = args.epochs or settings.ocr_train_epochs
     if batch_size < 1 or epochs < 1:
@@ -489,6 +552,7 @@ def run(args: argparse.Namespace) -> None:
         epochs=epochs,
         batch_size=batch_size,
         eval_batch_size=settings.ocr_train_eval_batch_size,
+        distributed=distributed,
         workers=settings.ocr_train_num_workers,
         learning_rate=settings.ocr_train_learning_rate,
         max_text_length=max_text_length,
@@ -503,20 +567,23 @@ def run(args: argparse.Namespace) -> None:
         yaml.safe_dump(generated, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
     )
-    train_command = [
-        sys.executable,
-        str(PROJECT_ROOT / "tools" / "paddleocr_entrypoint.py"),
-        str(repository / "tools" / "train.py"),
-        "-c",
-        str(generated_config_path),
-    ]
+    train_command = build_train_command(
+        repository,
+        generated_config_path,
+        output_dir,
+        gpu_device_ids,
+    )
     plan = {
         "model": settings.ocr_train_model_name,
         "dataset": str(dataset.dataset_dir),
         "output": str(output_dir),
         "device": device,
+        "gpu_device_ids": list(gpu_device_ids),
+        "distributed": distributed,
+        "world_size": len(gpu_device_ids) if device == "gpu" else 1,
         "epochs": epochs,
         "batch_size": batch_size,
+        "effective_batch_size": batch_size * max(1, len(gpu_device_ids)),
         "eval_batch_size": settings.ocr_train_eval_batch_size,
         "max_text_length": max_text_length,
         "image_shape": [3, settings.ocr_train_image_height, settings.ocr_train_image_width],
@@ -541,15 +608,25 @@ def run(args: argparse.Namespace) -> None:
         f"test={dataset.test_count}, max_text_length={max_text_length}"
     )
     print(f"Generated config: {generated_config_path}")
+    print(
+        "Training topology: "
+        f"distributed={distributed}; "
+        f"gpus={','.join(str(device_id) for device_id in gpu_device_ids) or 'none'}; "
+        f"batch_per_gpu={batch_size}; "
+        f"effective_batch={batch_size * max(1, len(gpu_device_ids))}"
+    )
     print("Command: " + subprocess.list2cmdline(train_command))
     if args.prepare_only:
         print("PREPARE ONLY: training was not started.")
         return
 
-    check_paddle_runtime(device)
+    check_paddle_runtime(device, gpu_device_ids)
     environment = os.environ.copy()
-    if device == "gpu":
-        environment["CUDA_VISIBLE_DEVICES"] = str(settings.ocr_train_gpu_device_id)
+    if device == "gpu" and not distributed:
+        environment["CUDA_VISIBLE_DEVICES"] = str(gpu_device_ids[0])
+    elif distributed:
+        # --gpus uses physical IDs; avoid an inherited mask remapping them.
+        environment.pop("CUDA_VISIBLE_DEVICES", None)
     subprocess.run(train_command, cwd=repository, env=environment, check=True)
 
     should_export = settings.ocr_train_export_after_train and not args.no_export
@@ -570,10 +647,19 @@ def run(args: argparse.Namespace) -> None:
         "-o",
         f"Global.pretrained_model={best_prefix}",
         f"Global.checkpoints=",
+        f"Global.distributed=False",
         f"Global.save_inference_dir={output_dir / 'inference'}",
     ]
     print("Export command: " + subprocess.list2cmdline(export_command))
-    subprocess.run(export_command, cwd=repository, env=environment, check=True)
+    export_environment = environment.copy()
+    if device == "gpu":
+        export_environment["CUDA_VISIBLE_DEVICES"] = str(gpu_device_ids[0])
+    subprocess.run(
+        export_command,
+        cwd=repository,
+        env=export_environment,
+        check=True,
+    )
     print(f"Inference model exported to: {output_dir / 'inference'}")
 
 

@@ -5,9 +5,11 @@ from pathlib import Path
 from tools.train_ocr_recognition import (
     DatasetInfo,
     build_extended_character_dictionary,
+    build_train_command,
     build_training_config,
     normalize_checkpoint_prefix,
 )
+from tools.ocr_recognition_train_config import parse_gpu_device_ids
 
 
 def test_paddle_entrypoint_exists() -> None:
@@ -73,6 +75,7 @@ def test_build_training_config_overrides_dataset_and_model_shape(tmp_path) -> No
         epochs=50,
         batch_size=64,
         eval_batch_size=1,
+        distributed=False,
         workers=2,
         learning_rate=0.0001,
         max_text_length=160,
@@ -86,6 +89,7 @@ def test_build_training_config_overrides_dataset_and_model_shape(tmp_path) -> No
     assert result["Global"]["use_gpu"] is True
     assert result["Global"]["epoch_num"] == 50
     assert result["Global"]["max_text_length"] == 160
+    assert result["Global"]["distributed"] is False
     assert result["Train"]["dataset"]["data_dir"] == str(tmp_path)
     assert result["Train"]["sampler"]["first_bs"] == 64
     assert result["Eval"]["loader"]["batch_size_per_card"] == 1
@@ -147,4 +151,26 @@ def test_extended_dictionary_preserves_official_duplicate_entries(tmp_path) -> N
         "a",
         "ạ",
     ]
+
+
+def test_parse_gpu_device_ids() -> None:
+    assert parse_gpu_device_ids(" 2, 3,4 ") == (2, 3, 4)
+    assert parse_gpu_device_ids("") == ()
+
+
+def test_multi_gpu_train_command_uses_paddle_launcher(tmp_path) -> None:
+    command = build_train_command(
+        tmp_path / "PaddleOCR",
+        tmp_path / "train.yml",
+        tmp_path / "output",
+        (2, 3, 4),
+    )
+
+    assert command[1:4] == [
+        "-m",
+        "paddle.distributed.launch",
+        "--log_dir=" + str(tmp_path / "output" / "distributed_logs"),
+    ]
+    assert "--gpus=2,3,4" in command
+    assert command[-2:] == ["-c", str(tmp_path / "train.yml")]
 

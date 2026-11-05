@@ -8,6 +8,23 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from app.core.config import PROJECT_ROOT
 
 
+def parse_gpu_device_ids(value: str) -> tuple[int, ...]:
+    normalized = value.strip()
+    if not normalized:
+        return ()
+    try:
+        device_ids = tuple(int(part.strip()) for part in normalized.split(","))
+    except ValueError as error:
+        raise ValueError(
+            "OCR_TRAIN_GPU_DEVICE_IDS must be comma-separated non-negative integers"
+        ) from error
+    if any(device_id < 0 for device_id in device_ids):
+        raise ValueError("OCR_TRAIN_GPU_DEVICE_IDS cannot contain negative IDs")
+    if len(device_ids) != len(set(device_ids)):
+        raise ValueError("OCR_TRAIN_GPU_DEVICE_IDS cannot contain duplicate IDs")
+    return device_ids
+
+
 class OcrRecognitionTrainSettings(BaseSettings):
     """Runtime configuration for fine-tuning PaddleOCR recognition."""
 
@@ -38,6 +55,7 @@ class OcrRecognitionTrainSettings(BaseSettings):
     )
     ocr_train_device: str = "gpu"
     ocr_train_gpu_device_id: int = Field(default=0, ge=0)
+    ocr_train_gpu_device_ids: str = ""
     ocr_train_epochs: int = Field(default=50, ge=1, le=1000)
     ocr_train_batch_size: int = Field(default=64, ge=1, le=2048)
     ocr_train_eval_batch_size: int = Field(default=1, ge=1, le=64)
@@ -64,6 +82,12 @@ class OcrRecognitionTrainSettings(BaseSettings):
             raise ValueError("OCR_TRAIN_DEVICE must be gpu or cpu")
         return normalized
 
+    @field_validator("ocr_train_gpu_device_ids")
+    @classmethod
+    def validate_gpu_device_ids(cls, value: str) -> str:
+        device_ids = parse_gpu_device_ids(value)
+        return ",".join(str(device_id) for device_id in device_ids)
+
     @staticmethod
     def _resolve(path: Path) -> Path:
         return path.resolve() if path.is_absolute() else (PROJECT_ROOT / path).resolve()
@@ -89,4 +113,9 @@ class OcrRecognitionTrainSettings(BaseSettings):
         if self.ocr_train_checkpoint is None:
             return None
         return self._resolve(self.ocr_train_checkpoint)
+
+    @property
+    def gpu_device_ids(self) -> tuple[int, ...]:
+        configured = parse_gpu_device_ids(self.ocr_train_gpu_device_ids)
+        return configured or (self.ocr_train_gpu_device_id,)
 
