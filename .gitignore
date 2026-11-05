@@ -20,6 +20,9 @@ output/
 *.png
 *.PNG
 
+*.JPG
+*.jpg
+
 # Generated annotation data: copied PDFs, rendered PNG pages and import inbox.
 # Keep explicit rules even though the whole data directory is ignored below.
 /data/annotation_storage/

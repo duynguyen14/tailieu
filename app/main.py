@@ -67,6 +67,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     teacher_extraction_review_service = TeacherExtractionReviewService(
         database=database,
+        ocr_review_service=ocr_review_service,
     )
 
     @asynccontextmanager

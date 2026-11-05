@@ -476,6 +476,33 @@ class OcrReviewService:
             details = [self._detail(session, run) for _, run, _ in rows]
         return OcrReviewDocumentDetail(document=summary, pages=details)
 
+    def get_document_pages_in_session(
+        self,
+        session,
+        *,
+        document_id: str,
+        included_only: bool = False,
+    ) -> list[OcrReviewDetail]:
+        """Build reviewed OCR page views without opening a nested transaction."""
+        conditions = [
+            AnnotationPage.document_id == document_id,
+            OcrReview.is_active == true(),
+            OcrReview.status == "REVIEWED",
+            OcrRun.is_active == true(),
+            OcrRun.status == "COMPLETED",
+        ]
+        if included_only:
+            conditions.append(OcrReview.include_in_llm == true())
+        rows = session.execute(
+            select(OcrRun)
+            .select_from(OcrReview)
+            .join(OcrRun, OcrRun.id == OcrReview.ocr_run_id)
+            .join(AnnotationPage, AnnotationPage.id == OcrRun.page_id)
+            .where(*conditions)
+            .order_by(AnnotationPage.page_number.asc(), OcrRun.id.asc())
+        ).scalars().all()
+        return [self._detail(session, run) for run in rows]
+
     def set_inclusion(
         self,
         *,

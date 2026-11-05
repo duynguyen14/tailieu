@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.schemas.ocr_review import OcrReviewDetail
+
 
 TEACHER_SCHEMA_VERSION = "compact-document-v1"
 
@@ -197,6 +199,15 @@ class TeacherExtractionCaseInfo(BaseModel):
     original_filename: str
 
 
+class TeacherStudentTrainingPreview(BaseModel):
+    model_id: str
+    schema_version: str
+    input_text: str
+    user_prompt: str
+    compact_target: list[Any]
+    schema_descriptor: dict[str, Any]
+
+
 class TeacherExtractionReviewDetail(BaseModel):
     review: TeacherExtractionReviewInfo
     job: TeacherExtractionJobInfo
@@ -204,6 +215,8 @@ class TeacherExtractionReviewDetail(BaseModel):
     case: TeacherExtractionCaseInfo
     input_text: str
     reviewed_output: dict[str, Any]
+    approved_ocr_pages: list[OcrReviewDetail] = Field(default_factory=list)
+    student_training: TeacherStudentTrainingPreview
     raw_response: dict[str, Any] | list[Any] | str | None
     validation_errors: dict[str, Any] | list[Any] | str | None
 

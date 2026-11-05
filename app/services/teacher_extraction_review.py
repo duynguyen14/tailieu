@@ -24,7 +24,16 @@ from app.schemas.teacher_extraction import (
     TeacherExtractionReviewInfo,
     TeacherExtractionReviewRequest,
     TeacherExtractionReviewStats,
+    TeacherStudentTrainingPreview,
 )
+from app.schemas.student_extraction import (
+    STUDENT_MODEL_ID,
+    STUDENT_SCHEMA_VERSION,
+    build_student_user_prompt,
+    compact_document_to_student_target,
+    student_schema_descriptor,
+)
+from app.services.ocr_review import OcrReviewService
 
 
 class TeacherExtractionReviewNotFoundError(LookupError):
@@ -40,8 +49,14 @@ class TeacherExtractionReviewValidationError(ValueError):
 
 
 class TeacherExtractionReviewService:
-    def __init__(self, *, database: Database) -> None:
+    def __init__(
+        self,
+        *,
+        database: Database,
+        ocr_review_service: OcrReviewService,
+    ) -> None:
         self._database = database
+        self._ocr_review_service = ocr_review_service
 
     def get_statistics(self) -> TeacherExtractionReviewStats:
         with self._database.session() as session:
@@ -72,7 +87,7 @@ class TeacherExtractionReviewService:
                 )
                 .limit(1)
             )
-            return self._detail(review) if review is not None else None, stats
+            return self._detail(session, review) if review is not None else None, stats
 
     def get_detail(self, review_id: str) -> TeacherExtractionReviewDetail:
         with self._database.session() as session:
@@ -83,7 +98,7 @@ class TeacherExtractionReviewService:
                 raise TeacherExtractionReviewNotFoundError(
                     "Teacher extraction review was not found."
                 )
-            return self._detail(review)
+            return self._detail(session, review)
 
     def review(
         self,
@@ -173,7 +188,7 @@ class TeacherExtractionReviewService:
                 raise TeacherExtractionReviewConflictError(
                     "SQL Server did not persist the new review version."
                 )
-            return self._detail(stored)
+            return self._detail(session, stored)
 
     @staticmethod
     def _detail_statement():
@@ -194,7 +209,7 @@ class TeacherExtractionReviewService:
             return value
 
     def _detail(
-        self, review: TeacherExtractionReview
+        self, session, review: TeacherExtractionReview
     ) -> TeacherExtractionReviewDetail:
         job = review.job
         attempt = review.source_attempt
@@ -203,6 +218,20 @@ class TeacherExtractionReviewService:
             raise TeacherExtractionReviewConflictError(
                 "Stored teacher review output is not a JSON object."
             )
+        try:
+            extraction = CompactDocumentExtraction.model_validate(output)
+        except ValidationError as exc:
+            raise TeacherExtractionReviewConflictError(
+                f"Stored teacher review output is invalid: {exc}"
+            ) from exc
+
+        approved_ocr_pages = self._ocr_review_service.get_document_pages_in_session(
+            session,
+            document_id=job.document_id,
+            included_only=True,
+        )
+
+        compact_target = compact_document_to_student_target(extraction)
         return TeacherExtractionReviewDetail(
             review=TeacherExtractionReviewInfo(
                 id=review.id,
@@ -248,6 +277,15 @@ class TeacherExtractionReviewService:
             ),
             input_text=job.input_text,
             reviewed_output=output,
+            approved_ocr_pages=approved_ocr_pages,
+            student_training=TeacherStudentTrainingPreview(
+                model_id=STUDENT_MODEL_ID,
+                schema_version=STUDENT_SCHEMA_VERSION,
+                input_text=job.input_text,
+                user_prompt=build_student_user_prompt(job.input_text),
+                compact_target=compact_target,
+                schema_descriptor=student_schema_descriptor(),
+            ),
             raw_response=self._json_value(attempt.raw_response_json),
             validation_errors=self._json_value(attempt.validation_errors_json),
         )
