@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 from collections import Counter
@@ -85,13 +86,36 @@ def record_hash(input_text: str, target: list[Any]) -> str:
     return hashlib.sha256(canonical_json(material).encode("utf-8")).hexdigest()
 
 
+def normalize_teacher_payload_for_student(payload: dict[str, Any]) -> dict[str, Any]:
+    """Remove graph-only identities before validating/exporting student data.
+
+    The compact production student never predicts person IDs or relationship
+    links.  Teacher reviews can therefore contain stale links after a reviewer
+    removes an applicant.  Normalize those internal fields deterministically;
+    the human-reviewed business fields remain unchanged.
+    """
+
+    normalized = copy.deepcopy(payload)
+    applicants = normalized.get("applicants")
+    if isinstance(applicants, list):
+        for index, applicant in enumerate(applicants, start=1):
+            if not isinstance(applicant, dict):
+                continue
+            applicant["person_id"] = f"person_{index}"
+            applicant["sequence_number"] = index
+            applicant["related_to_person_id"] = None
+    return normalized
+
+
 def build_example(review: TeacherExtractionReview) -> ExportExample:
     job = review.job
     try:
         raw_target = json.loads(review.reviewed_output_json)
     except json.JSONDecodeError as exc:
         raise ValueError(f"Review {review.id} contains invalid JSON: {exc}") from exc
-    extraction = CompactDocumentExtraction.model_validate(raw_target)
+    extraction = CompactDocumentExtraction.model_validate(
+        normalize_teacher_payload_for_student(raw_target)
+    )
     if extraction.case_id != job.case_id:
         raise ValueError(
             f"Review {review.id} case_id does not match job {job.id}."
