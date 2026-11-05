@@ -328,7 +328,26 @@ def tokenize_records(
         prompt = full_ids[:prefix_length]
         target = full_ids[prefix_length:]
         if not target:
-            raise RuntimeError(f"Record {record.record_id} has no supervised tokens")
+            # A few tokenizer/chat-template combinations can merge the boundary
+            # between the generation prompt and the assistant response so that
+            # the separately rendered sequences appear identical at token level.
+            # The dataset reader has already validated assistant_text as a
+            # non-empty JSON target.  Re-encode that target explicitly instead
+            # of dropping an otherwise valid supervised example.
+            prompt = prompt_ids
+            target = list(
+                tokenizer.encode(record.assistant_text, add_special_tokens=False)
+            )
+            eos_token_id = tokenizer.eos_token_id
+            if eos_token_id is not None and (
+                not target or target[-1] != eos_token_id
+            ):
+                target.append(eos_token_id)
+            if not target:
+                raise RuntimeError(
+                    f"Record {record.record_id} has no supervised tokens after "
+                    "explicit target encoding"
+                )
         if len(target) >= maximum_length:
             raise RuntimeError(
                 f"Target for record {record.record_id} uses {len(target)} tokens; "
