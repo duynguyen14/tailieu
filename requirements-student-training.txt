@@ -1,0 +1,10 @@
+# Student extractor SFT. Install the CUDA-enabled PyTorch wheel separately so
+# this file never silently replaces a working server-specific Torch build.
+-r requirements.txt
+
+transformers>=4.56,<6.0
+accelerate>=1.10,<2.0
+peft>=0.17,<1.0
+huggingface-hub>=0.34,<2.0
+safetensors>=0.5,<1.0
+sentencepiece>=0.2,<1.0
