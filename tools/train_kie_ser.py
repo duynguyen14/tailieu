@@ -812,7 +812,11 @@ def run_worker(settings: KieSerTrainSettings) -> None:
         "fp16": precision == "fp16",
         "tf32": use_cuda,
         "dataloader_num_workers": settings.kie_train_num_workers,
-        "ddp_find_unused_parameters": False if world_size > 1 else None,
+        # LayoutLMv3ForTokenClassification keeps a few base-model parameters
+        # outside the SER loss graph. DDP must explicitly account for them;
+        # otherwise the second optimizer iteration fails with an unfinished
+        # reduction error. Single-GPU training does not need this setting.
+        "ddp_find_unused_parameters": True if world_size > 1 else None,
         "report_to": "none",
         "remove_unused_columns": False,
         "label_names": ["labels"],
