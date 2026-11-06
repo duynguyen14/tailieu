@@ -215,7 +215,7 @@ class TeacherStudentTrainingPreview(BaseModel):
     schema_version: str
     input_text: str
     user_prompt: str
-    compact_target: list[Any]
+    compact_target: dict[str, Any]
     schema_descriptor: dict[str, Any]
 
 

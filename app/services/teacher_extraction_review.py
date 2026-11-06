@@ -10,7 +10,6 @@ from sqlalchemy.orm import joinedload
 
 from app.db.database import Database
 from app.db.models import (
-    TeacherExtractionAttempt,
     TeacherExtractionJob,
     TeacherExtractionReview,
     utc_now,
@@ -283,7 +282,7 @@ class TeacherExtractionReviewService:
             # A reviewer must still be able to reopen and repair a loosely
             # structured JSON version. Approval/export can be handled after the
             # form has brought it back to the canonical shape.
-            compact_target = []
+            compact_target = {}
             preview_error = str(exc)
 
         approved_ocr_pages = self._ocr_review_service.get_document_pages_in_session(

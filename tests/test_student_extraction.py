@@ -56,16 +56,19 @@ def extraction() -> CompactDocumentExtraction:
     )
 
 
-def test_student_target_is_reduced_positional_json() -> None:
+def test_student_target_is_reduced_short_key_json() -> None:
     target = compact_document_to_student_target(extraction())
 
-    assert len(target) == 2
-    assert len(target[0]) == len(STUDENT_NOTE_FIELDS)
-    assert all(len(row) == len(STUDENT_APPLICANT_FIELDS) for row in target[1])
-    assert target[0][0] == "850-2026"
-    assert target[1][0][0] == "Nicholas John Hogarth"
-    assert target[1][0][4] == "RF0210530"
-    assert target[1][0][9] == "MULTIPLE"
+    assert set(target) == {"n", "a"}
+    assert len(target["n"]) == len(STUDENT_NOTE_FIELDS)
+    assert all(
+        len(applicant) == len(STUDENT_APPLICANT_FIELDS)
+        for applicant in target["a"]
+    )
+    assert target["n"]["no"] == "850-2026"
+    assert target["a"][0]["nm"] == "Nicholas John Hogarth"
+    assert target["a"][0]["pp"] == "RF0210530"
+    assert target["a"][0]["ne"] == "MULTIPLE"
 
 
 def test_student_target_round_trip_restores_canonical_backend_fields() -> None:
@@ -89,14 +92,21 @@ def test_student_target_round_trip_restores_canonical_backend_fields() -> None:
 
 
 def test_student_target_rejects_invalid_root_and_extra_fields() -> None:
-    with pytest.raises(ValueError, match="JSON array"):
+    with pytest.raises(ValueError, match="JSON object"):
         student_target_to_compact_document(
-            {"not": "an array"}, case_id="case-1", document_id="document-1"
+            ["not", "an object"], case_id="case-1", document_id="document-1"
         )
 
     target = compact_document_to_student_target(extraction())
-    target[1][0].append("extra position")
-    with pytest.raises(ValueError, match="exactly 12 values"):
+    target["a"][0]["extra"] = "not allowed"
+    with pytest.raises(ValueError, match=r"a\[0\] must contain exactly the keys"):
+        student_target_to_compact_document(
+            target, case_id="case-1", document_id="document-1"
+        )
+
+    target = compact_document_to_student_target(extraction())
+    del target["a"][0]["dob"]
+    with pytest.raises(ValueError, match=r"a\[0\] must contain exactly the keys"):
         student_target_to_compact_document(
             target, case_id="case-1", document_id="document-1"
         )
@@ -137,10 +147,11 @@ def test_training_record_uses_user_and_assistant_messages() -> None:
 
 def test_prompt_contains_locked_compact_contract() -> None:
     prompt = build_student_user_prompt("source")
-    assert "positional JSON array" in prompt
-    assert "exactly 5 values" in prompt
-    assert "exactly 12 values" in prompt
-    assert "Do not add, remove, or reorder positions" in prompt
+    assert "compact JSON object" in prompt
+    assert "root keys n and a" in prompt
+    assert "no=note_number" in prompt
+    assert "nm=full_name" in prompt
+    assert "All listed keys are mandatory" in prompt
 
 
 def test_export_normalizes_internal_person_ids_and_stale_links() -> None:

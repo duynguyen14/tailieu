@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 from app.schemas.student_extraction import (
-    STUDENT_NOTE_FIELDS,
     STUDENT_SCHEMA_VERSION,
 )
 from tools.student_extractor_train_config import (
@@ -30,10 +29,15 @@ def write_split(path: Path, split: str, record_id: str) -> None:
             {
                 "role": "assistant",
                 "content": json.dumps(
-                    [
-                        [None for _ in STUDENT_NOTE_FIELDS],
-                        [],
-                    ]
+                    {
+                        "n": {
+                            "no": None,
+                            "dt": None,
+                            "pl": None,
+                            "snd": None,
+                        },
+                        "a": [],
+                    }
                 ),
             },
         ],

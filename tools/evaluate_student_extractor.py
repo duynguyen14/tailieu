@@ -16,10 +16,10 @@ from app.core.config import PROJECT_ROOT
 from app.schemas.student_extraction import student_target_to_compact_document
 from tools.train_student_extractor import DatasetRecord, read_training_records
 
-DEFAULT_DATASET_DIR = Path("data/training/gemma3_270m_positional_v4")
-DEFAULT_MODEL_DIR = Path("output/student_extractor_gemma3_270m_positional_v4/merged_model")
+DEFAULT_DATASET_DIR = Path("data/training/gemma3_270m_shortkey_v6")
+DEFAULT_MODEL_DIR = Path("output/student_extractor_gemma3_270m_shortkey_v6/merged_model")
 DEFAULT_OUTPUT_DIR = Path(
-    "output/student_extractor_gemma3_270m_positional_v4/test_evaluation"
+    "output/student_extractor_gemma3_270m_shortkey_v6/test_evaluation"
 )
 
 
@@ -64,7 +64,7 @@ def parse_args() -> argparse.Namespace:
         choices=("auto", "bf16", "fp16", "fp32"),
         default="auto",
     )
-    parser.add_argument("--max-new-tokens", type=int, default=1024)
+    parser.add_argument("--max-new-tokens", type=int, default=512)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--fail-on-invalid", action="store_true")
@@ -256,13 +256,11 @@ def evaluate_record(
         if path in predicted_fields and predicted_fields[path] == value
     )
     applicant_count_match = bool(
-        isinstance(prediction, list)
-        and len(prediction) == 2
-        and isinstance(prediction[1], list)
-        and isinstance(expected, list)
-        and len(expected) == 2
-        and isinstance(expected[1], list)
-        and len(prediction[1]) == len(expected[1])
+        isinstance(prediction, dict)
+        and isinstance(prediction.get("a"), list)
+        and isinstance(expected, dict)
+        and isinstance(expected.get("a"), list)
+        and len(prediction["a"]) == len(expected["a"])
     )
     return PredictionResult(
         id=record.record_id,
@@ -306,7 +304,8 @@ def build_metrics(results: list[PredictionResult], args: argparse.Namespace) -> 
         field_precision + field_recall,
     )
     return {
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        # Keep Python 3.10 compatibility on the Linux training host.
+        "created_at": datetime.now(timezone.utc).isoformat(),  # noqa: UP017
         "model_dir": str(resolve_path(args.model_dir)),
         "dataset_file": str(resolve_path(args.dataset_dir) / f"{args.split}.jsonl"),
         "split": args.split,
