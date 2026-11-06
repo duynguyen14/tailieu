@@ -6,18 +6,33 @@ from tools.predict_kie_ser import decode_bio_entities, model_inputs_to_device
 
 
 class FakeTensor:
-    def __init__(self) -> None:
+    def __init__(self, shape=(1,)) -> None:
         self.device = None
+        self.shape = shape
+        self.ndim = len(shape)
 
     def to(self, device):
         self.device = device
         return self
 
+    def repeat(self, *repeats):
+        self.shape = tuple(
+            size * multiplier for size, multiplier in zip(self.shape, repeats)
+        )
+        return self
+
+
+class FakeTorch:
+    @staticmethod
+    def stack(items, dim=0):
+        assert dim == 0
+        return FakeTensor((len(items),) + items[0].shape)
+
 
 def test_model_inputs_ignore_processor_overflow_metadata_lists() -> None:
-    input_ids = FakeTensor()
-    bbox = FakeTensor()
-    pixel_values = FakeTensor()
+    input_ids = FakeTensor((2, 512))
+    bbox = FakeTensor((2, 512, 4))
+    pixel_values = FakeTensor((2, 3, 224, 224))
     result = model_inputs_to_device(
         {
             "input_ids": input_ids,
@@ -34,6 +49,22 @@ def test_model_inputs_ignore_processor_overflow_metadata_lists() -> None:
     assert input_ids.device == "cuda:0"
     assert bbox.device == "cuda:0"
     assert pixel_values.device == "cuda:0"
+
+
+def test_model_inputs_stack_and_repeat_list_pixel_values_for_chunks() -> None:
+    result = model_inputs_to_device(
+        {
+            "input_ids": FakeTensor((3, 512)),
+            "attention_mask": FakeTensor((3, 512)),
+            "bbox": FakeTensor((3, 512, 4)),
+            "pixel_values": [FakeTensor((3, 224, 224))],
+        },
+        "cuda:0",
+        torch_module=FakeTorch(),
+    )
+
+    assert result["pixel_values"].shape == (3, 3, 224, 224)
+    assert result["pixel_values"].device == "cuda:0"
 
 
 def test_decode_bio_entities_repairs_orphan_i_and_merges_bbox() -> None:

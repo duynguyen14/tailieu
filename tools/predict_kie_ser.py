@@ -95,6 +95,8 @@ def read_jsonl(path: Path, limit: int = 0) -> list[dict[str, Any]]:
 def model_inputs_to_device(
     encoding: Any,
     device: Any,
+    *,
+    torch_module: Any | None = None,
 ) -> dict[str, Any]:
     """Move only tensors accepted by LayoutLMv3 to the runtime device.
 
@@ -108,19 +110,66 @@ def model_inputs_to_device(
         if key not in LAYOUTLMV3_MODEL_INPUT_KEYS:
             continue
         move = getattr(value, "to", None)
-        if not callable(move):
+        if callable(move):
+            tensor = value
+        elif torch_module is not None and key == "pixel_values" and isinstance(
+            value, (list, tuple)
+        ):
+            if not value:
+                raise RuntimeError("LayoutLMv3 processor returned empty pixel_values.")
+            pixel_tensors = [
+                item
+                if callable(getattr(item, "to", None))
+                else torch_module.as_tensor(item)
+                for item in value
+            ]
+            dimensions = [int(item.ndim) for item in pixel_tensors]
+            if all(dimension == 3 for dimension in dimensions):
+                tensor = torch_module.stack(pixel_tensors, dim=0)
+            elif all(dimension == 4 for dimension in dimensions):
+                tensor = torch_module.cat(pixel_tensors, dim=0)
+            else:
+                flattened = []
+                for item in pixel_tensors:
+                    if int(item.ndim) == 3:
+                        flattened.append(item)
+                    elif int(item.ndim) == 4:
+                        flattened.extend(torch_module.unbind(item, dim=0))
+                    else:
+                        raise RuntimeError(
+                            "LayoutLMv3 pixel_values items must have 3 or 4 "
+                            f"dimensions; got {int(item.ndim)}."
+                        )
+                tensor = torch_module.stack(flattened, dim=0)
+        elif torch_module is not None and isinstance(value, (list, tuple)):
+            tensor = torch_module.as_tensor(value)
+        else:
             raise RuntimeError(
                 f"LayoutLMv3 processor returned non-tensor model input "
                 f"{key!r}: {type(value).__name__}."
             )
-        model_inputs[key] = move(device)
+        model_inputs[key] = tensor
     missing = sorted({"input_ids", "bbox", "pixel_values"} - set(model_inputs))
     if missing:
         raise RuntimeError(
             "LayoutLMv3 processor omitted required tensor input(s): "
             + ", ".join(missing)
         )
-    return model_inputs
+    expected_batch = int(model_inputs["input_ids"].shape[0])
+    pixel_batch = int(model_inputs["pixel_values"].shape[0])
+    if pixel_batch == 1 and expected_batch > 1:
+        repeats = (expected_batch,) + (1,) * (
+            int(model_inputs["pixel_values"].ndim) - 1
+        )
+        model_inputs["pixel_values"] = model_inputs["pixel_values"].repeat(
+            *repeats
+        )
+    elif pixel_batch != expected_batch:
+        raise RuntimeError(
+            "LayoutLMv3 processor produced mismatched chunk/image batches: "
+            f"input_ids={expected_batch}, pixel_values={pixel_batch}."
+        )
+    return {key: value.to(device) for key, value in model_inputs.items()}
 
 
 def decode_bio_entities(
@@ -252,7 +301,11 @@ class LayoutLmV3SerPredictor:
             )
         word_predictions: dict[int, tuple[str, float]] = {}
         chunk_count = int(encoding["input_ids"].shape[0])
-        model_inputs = model_inputs_to_device(encoding, self.device)
+        model_inputs = model_inputs_to_device(
+            encoding,
+            self.device,
+            torch_module=torch,
+        )
         with torch.inference_mode():
             if self.device.type == "cuda":
                 with torch.autocast(device_type="cuda", dtype=torch.float16):
