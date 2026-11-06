@@ -27,7 +27,7 @@ from tools.audit_kie_alignment import (
     _review_statement,
 )
 
-ALGORITHM_VERSION = "kie-alignment-review-v1"
+ALGORITHM_VERSION = "kie-character-span-review-v2"
 
 
 def parse_args():
@@ -146,14 +146,22 @@ def run(args):
                                 continue
                             bbox = tuple(candidate["bbox"])
                             normalized = _normalized_bbox(bbox, page.image_width, page.image_height)
+                            spans = candidate.get("spans") or []
+                            value = " ".join(span["text"] for span in spans).strip()
+                            if not value:
+                                # Keep the candidate visible for manual review,
+                                # but never disguise a fuzzy whole-line match as
+                                # an exact supervised character span.
+                                value = str(alignment["value"])
                             entity = KieEntityAnnotation(
                                 id=str(uuid4()), page_annotation_id=page.id,
                                 field_proposal_id=proposal_id,
                                 entity_key=f"{alignment['field_path']}#{rank}",
                                 label=_entity_label(alignment["entity_type"], alignment["field"]),
-                                value=candidate["text"], field_path=alignment["field_path"],
+                                value=value, field_path=alignment["field_path"],
                                 applicant_index=alignment["entity_index"],
                                 token_ids_json=json.dumps(candidate["token_ids"]),
+                                spans_json=json.dumps(spans, ensure_ascii=False),
                                 x1=bbox[0], y1=bbox[1], x2=bbox[2], y2=bbox[3],
                                 nx1=normalized[0], ny1=normalized[1], nx2=normalized[2], ny2=normalized[3],
                                 confidence=Decimal(str(candidate["selection_score"])), source="MODEL",

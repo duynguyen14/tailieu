@@ -79,8 +79,8 @@ def test_kie_ser_then_re_review_creates_snapshots() -> None:
             json={
                 "reviewed_by": "thai", "review_note": "SER checked",
                 "entities": [
-                    {"label": "FULL_NAME", "value": "NGUYEN VAN A", "field_path": "applicants[0].full_name", "applicant_index": 0, "token_ids": ["token-1"], "bbox": [1, 2, 30, 12]},
-                    {"label": "PASSPORT_NUMBER", "value": "P123456", "field_path": "applicants[0].passport_number", "applicant_index": 0, "token_ids": ["token-2"], "bbox": [40, 2, 70, 12]},
+                    {"label": "FULL_NAME", "value": "NGUYEN VAN A", "field_path": "applicants[0].full_name", "applicant_index": 0, "token_ids": ["token-1"], "spans": [{"token_id": "token-1", "char_start": 0, "char_end": 12}], "bbox": [1, 2, 30, 12]},
+                    {"label": "PASSPORT_NUMBER", "value": "P123456", "field_path": "applicants[0].passport_number", "applicant_index": 0, "token_ids": ["token-2"], "spans": [{"token_id": "token-2", "char_start": 0, "char_end": 7}], "bbox": [40, 2, 70, 12]},
                 ],
             },
         )

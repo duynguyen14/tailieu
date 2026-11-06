@@ -106,18 +106,49 @@ class KieReviewService:
             page = session.scalar(select(KiePageAnnotation).where(KiePageAnnotation.id == page_annotation_id).with_for_update())
             if page is None:
                 raise KieReviewNotFoundError("KIE page annotation was not found.")
-            valid_tokens = set(session.scalars(select(OcrReviewToken.id).where(OcrReviewToken.review_id == page.ocr_review_id)))
+            token_by_id = {
+                token.id: token
+                for token in session.scalars(
+                    select(OcrReviewToken).where(OcrReviewToken.review_id == page.ocr_review_id)
+                )
+            }
             old_entities = {item.id: item for item in session.scalars(select(KieEntityAnnotation).where(KieEntityAnnotation.page_annotation_id == page.id, KieEntityAnnotation.is_active == true()))}
+            validated_spans: list[list[dict]] = []
             for item in payload.entities:
-                if any(token_id not in valid_tokens for token_id in item.token_ids):
+                if any(token_id not in token_by_id for token_id in item.token_ids):
                     raise KieReviewValidationError("An entity references a token outside the approved OCR snapshot.")
+                span_rows: list[dict] = []
+                for span in item.spans:
+                    token = token_by_id.get(span.token_id)
+                    if token is None:
+                        raise KieReviewValidationError("An entity span references a token outside the approved OCR snapshot.")
+                    token_text = token.reviewed_text
+                    if span.char_end > len(token_text):
+                        raise KieReviewValidationError(
+                            f"Entity span [{span.char_start},{span.char_end}) exceeds OCR token length {len(token_text)}."
+                        )
+                    span_rows.append({
+                        "token_id": span.token_id,
+                        "char_start": span.char_start,
+                        "char_end": span.char_end,
+                        "text": token_text[span.char_start:span.char_end],
+                    })
+                span_token_ids = list(dict.fromkeys(row["token_id"] for row in span_rows))
+                if set(span_token_ids) != set(item.token_ids):
+                    raise KieReviewValidationError("Entity token_ids must match the tokens referenced by its character spans.")
+                expected_value = " ".join(row["text"] for row in span_rows).strip()
+                if " ".join(item.value.split()) != " ".join(expected_value.split()):
+                    raise KieReviewValidationError(
+                        f"Entity value must equal its selected OCR character spans; expected '{expected_value}'."
+                    )
+                validated_spans.append(span_rows)
                 x1, y1, x2, y2 = item.bbox
                 if x2 > page.image_width or y2 > page.image_height:
                     raise KieReviewValidationError("An entity bbox is outside the OCR image.")
             now = utc_now()
             session.execute(update(KieEntityAnnotation).where(KieEntityAnnotation.page_annotation_id == page.id, KieEntityAnnotation.is_active == true()).values(is_active=False, updated_at=now))
             session.execute(update(KieRelationAnnotation).where(KieRelationAnnotation.page_annotation_id == page.id, KieRelationAnnotation.is_active == true()).values(is_active=False, updated_at=now))
-            for index, item in enumerate(payload.entities, start=1):
+            for index, (item, span_rows) in enumerate(zip(payload.entities, validated_spans), start=1):
                 x1, y1, x2, y2 = item.bbox
                 nx1, ny1, nx2, ny2 = self._normalized(item.bbox, page.image_width, page.image_height)
                 session.add(KieEntityAnnotation(
@@ -125,7 +156,9 @@ class KieReviewService:
                     parent_entity_id=item.id if item.id in old_entities else None,
                     entity_key=f"human_{index}", label=item.label.strip(), value=item.value.strip(),
                     field_path=item.field_path, applicant_index=item.applicant_index,
-                    token_ids_json=json.dumps(item.token_ids), x1=x1, y1=y1, x2=x2, y2=y2,
+                    token_ids_json=json.dumps(item.token_ids),
+                    spans_json=json.dumps(span_rows, ensure_ascii=False),
+                    x1=x1, y1=y1, x2=x2, y2=y2,
                     nx1=nx1, ny1=ny1, nx2=nx2, ny2=ny2, confidence=Decimal("1"),
                     source="HUMAN", is_active=True,
                 ))
@@ -213,7 +246,7 @@ class KieReviewService:
             ser_status=page.ser_status, re_status=page.re_status,
             tokens=[KieTokenView(id=t.id, order=t.token_order, text=t.reviewed_text, bbox=[t.x1,t.y1,t.x2,t.y2]) for t in tokens],
             proposals=[KieFieldProposalView(id=p.id, field_path=p.field_path, entity_type=p.entity_type, entity_index=p.entity_index, field_name=p.field_name, expected_value=p.expected_value, match_status=p.match_status, chosen=json.loads(p.chosen_json) if p.chosen_json else None, candidates=json.loads(p.candidates_json)) for p in proposals],
-            entities=[KieEntityView(id=e.id, label=e.label, value=e.value, field_path=e.field_path, applicant_index=e.applicant_index, token_ids=json.loads(e.token_ids_json), bbox=[e.x1,e.y1,e.x2,e.y2], normalized_bbox=[e.nx1,e.ny1,e.nx2,e.ny2], confidence=float(e.confidence) if e.confidence is not None else None, source=e.source, candidate_rank=e.candidate_rank) for e in entities],
+            entities=[KieEntityView(id=e.id, label=e.label, value=e.value, field_path=e.field_path, applicant_index=e.applicant_index, token_ids=json.loads(e.token_ids_json), spans=json.loads(e.spans_json), bbox=[e.x1,e.y1,e.x2,e.y2], normalized_bbox=[e.nx1,e.ny1,e.nx2,e.ny2], confidence=float(e.confidence) if e.confidence is not None else None, source=e.source, candidate_rank=e.candidate_rank) for e in entities],
             relations=[KieRelationView(id=r.id, head_entity_id=r.head_entity_id, tail_entity_id=r.tail_entity_id, relation_type=r.relation_type, applicant_index=r.applicant_index, confidence=float(r.confidence) if r.confidence is not None else None, source=r.source) for r in relations],
         )
 

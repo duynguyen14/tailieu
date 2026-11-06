@@ -157,6 +157,14 @@ class AuditToken:
 
 
 @dataclass(frozen=True)
+class CharacterSpan:
+    token_id: str
+    char_start: int
+    char_end: int
+    text: str
+
+
+@dataclass(frozen=True)
 class Candidate:
     page_id: str
     page_number: int
@@ -166,6 +174,7 @@ class Candidate:
     token_ids: tuple[str, ...]
     token_orders: tuple[int, ...]
     text: str
+    spans: tuple[CharacterSpan, ...]
     bbox: tuple[int, int, int, int]
     base_score: float
     score: float
@@ -358,6 +367,83 @@ def _score_text(target_variants: Iterable[str], candidate_text: str) -> tuple[fl
     )
 
 
+def _fold_text_with_offsets(value: str) -> tuple[str, list[int]]:
+    """Fold text like ``_fold_text`` while retaining source character offsets."""
+    folded: list[str] = []
+    offsets: list[int] = []
+    for source_index, source_character in enumerate(value):
+        source_character = source_character.replace("Đ", "D").replace("đ", "d")
+        for character in unicodedata.normalize("NFKD", source_character).casefold():
+            if not unicodedata.combining(character) and character.isalnum():
+                folded.append(character)
+                offsets.append(source_index)
+    return "".join(folded), offsets
+
+
+def _locate_character_spans(
+    target_variants: Iterable[str], tokens: list[AuditToken]
+) -> tuple[CharacterSpan, ...]:
+    """Locate an exact normalized target inside one or more OCR line tokens.
+
+    Fuzzy candidates deliberately return no spans: a reviewer must choose the
+    literal source text instead of silently training on an approximate label.
+    """
+    folded_source: list[str] = []
+    source_locations: list[tuple[int, int]] = []
+    for token_index, token in enumerate(tokens):
+        folded_token, offsets = _fold_text_with_offsets(token.text)
+        folded_source.extend(folded_token)
+        source_locations.extend((token_index, offset) for offset in offsets)
+    source = "".join(folded_source)
+    if not source:
+        return ()
+
+    matches: list[tuple[int, int]] = []
+    for variant in target_variants:
+        folded_variant = _fold_text(variant)
+        if not folded_variant:
+            continue
+        search_from = 0
+        while True:
+            start = source.find(folded_variant, search_from)
+            if start < 0:
+                break
+            end = start + len(folded_variant)
+            first_token_index, first_offset = source_locations[start]
+            last_token_index, last_offset = source_locations[end - 1]
+            first_text = tokens[first_token_index].text
+            last_text = tokens[last_token_index].text
+            starts_inside_word = first_offset > 0 and first_text[first_offset - 1].isalnum()
+            ends_inside_word = last_offset + 1 < len(last_text) and last_text[last_offset + 1].isalnum()
+            if not starts_inside_word and not ends_inside_word:
+                matches.append((start, end))
+            search_from = start + 1
+    if not matches:
+        return ()
+
+    # Prefer the longest literal representation; it is normally the most
+    # informative date/name variant and avoids selecting a shorter substring.
+    start, end = max(matches, key=lambda item: item[1] - item[0])
+    covered: dict[int, list[int]] = defaultdict(list)
+    for token_index, character_offset in source_locations[start:end]:
+        covered[token_index].append(character_offset)
+
+    spans: list[CharacterSpan] = []
+    for token_index in sorted(covered):
+        token = tokens[token_index]
+        char_start = min(covered[token_index])
+        char_end = max(covered[token_index]) + 1
+        spans.append(
+            CharacterSpan(
+                token_id=token.token_id,
+                char_start=char_start,
+                char_end=char_end,
+                text=token.text[char_start:char_end],
+            )
+        )
+    return tuple(spans)
+
+
 def _union_bbox(tokens: list[AuditToken]) -> tuple[int, int, int, int]:
     return (
         min(token.x1 for token in tokens),
@@ -416,6 +502,7 @@ def find_candidates(
                         token_ids=tuple(token.token_id for token in span),
                         token_orders=tuple(token.token_order for token in span),
                         text=text,
+                        spans=_locate_character_spans(variants, span),
                         bbox=_union_bbox(span),
                         base_score=score,
                         score=score,
@@ -482,6 +569,15 @@ def _candidate_payload(candidate: Candidate) -> dict[str, Any]:
         "token_ids": list(candidate.token_ids),
         "token_orders": list(candidate.token_orders),
         "text": candidate.text,
+        "spans": [
+            {
+                "token_id": span.token_id,
+                "char_start": span.char_start,
+                "char_end": span.char_end,
+                "text": span.text,
+            }
+            for span in candidate.spans
+        ],
         "bbox": list(candidate.bbox),
         "base_score": round(candidate.base_score, 6),
         "selection_score": round(candidate.score, 6),

@@ -37,6 +37,23 @@ class KieFieldProposalView(BaseModel):
     candidates: list[dict]
 
 
+class KieTextSpanInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    token_id: str = Field(min_length=1)
+    char_start: int = Field(ge=0)
+    char_end: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def range_is_valid(self):
+        if self.char_end <= self.char_start:
+            raise ValueError("char_end must be greater than char_start")
+        return self
+
+
+class KieTextSpanView(KieTextSpanInput):
+    text: str
+
+
 class KieEntityInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str | None = None
@@ -45,6 +62,7 @@ class KieEntityInput(BaseModel):
     field_path: str | None = None
     applicant_index: int | None = Field(default=None, ge=0)
     token_ids: list[str] = Field(default_factory=list)
+    spans: list[KieTextSpanInput] = Field(min_length=1)
     bbox: list[int] = Field(min_length=4, max_length=4)
 
     @model_validator(mode="after")
@@ -57,6 +75,9 @@ class KieEntityInput(BaseModel):
 
 class KieEntityView(KieEntityInput):
     id: str
+    # Generated fuzzy candidates may intentionally have no exact character
+    # span yet; the review request still requires at least one span.
+    spans: list[KieTextSpanView] = Field(default_factory=list)
     normalized_bbox: list[int]
     confidence: float | None
     source: str

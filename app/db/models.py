@@ -886,6 +886,7 @@ class KieEntityAnnotation(Base):
     field_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     applicant_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     token_ids_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    spans_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     x1: Mapped[int] = mapped_column(Integer, nullable=False)
     y1: Mapped[int] = mapped_column(Integer, nullable=False)
     x2: Mapped[int] = mapped_column(Integer, nullable=False)

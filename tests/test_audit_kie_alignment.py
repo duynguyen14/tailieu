@@ -51,6 +51,7 @@ def test_date_value_matches_human_readable_ocr_date() -> None:
     assert chosen is not None
     assert chosen.page_number == 2
     assert chosen.token_ids == ("token-1",)
+    assert [span.text for span in chosen.spans] == ["14/10/1976"]
 
 
 def test_repeated_value_is_ambiguous() -> None:
@@ -88,6 +89,7 @@ def test_split_name_matches_across_adjacent_ocr_tokens() -> None:
     assert status == "MATCHED"
     assert chosen is not None
     assert chosen.token_ids == ("token-1", "token-2", "token-3")
+    assert [span.text for span in chosen.spans] == ["NICHOLAS", "JOHN", "HOGARTH"]
 
 
 def test_date_variants_cover_english_and_vietnamese_documents() -> None:
@@ -115,6 +117,39 @@ def test_iso_teacher_date_matches_english_month_ocr_text() -> None:
     assert status == "MATCHED"
     assert chosen is not None
     assert "date_context" in chosen.method
+    assert [span.text for span in chosen.spans] == ["14th October 2026"]
+
+
+def test_value_inside_long_ocr_line_gets_precise_character_span() -> None:
+    source = "approval number (NG4) at the International Airports"
+    candidates = find_candidates(
+        FieldTarget("applicant", 0, "visa_type", "NG4"),
+        [token(1, source)],
+        minimum_score=0.88,
+        max_span_tokens=2,
+    )
+
+    status, chosen = choose_status(
+        candidates, minimum_score=0.88, ambiguity_margin=0.035
+    )
+
+    assert status == "MATCHED"
+    assert chosen is not None
+    assert len(chosen.spans) == 1
+    span = chosen.spans[0]
+    assert source[span.char_start:span.char_end] == "NG4"
+
+
+def test_character_span_does_not_match_inside_another_word() -> None:
+    candidates = find_candidates(
+        FieldTarget("applicant", 0, "gender", "Male"),
+        [token(1, "Gender: Female")],
+        minimum_score=0.88,
+        max_span_tokens=2,
+    )
+
+    assert candidates
+    assert candidates[0].spans == ()
 
 
 def test_bbox_is_normalized_against_processed_image_dimensions() -> None:
