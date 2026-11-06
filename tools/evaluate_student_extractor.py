@@ -16,11 +16,10 @@ from app.core.config import PROJECT_ROOT
 from app.schemas.student_extraction import student_target_to_compact_document
 from tools.train_student_extractor import DatasetRecord, read_training_records
 
-
-DEFAULT_DATASET_DIR = Path("data/training/gemma3_270m_compact_v2")
-DEFAULT_MODEL_DIR = Path("output/student_extractor_gemma3_270m_compact_v2/merged_model")
+DEFAULT_DATASET_DIR = Path("data/training/gemma3_270m_positional_v4")
+DEFAULT_MODEL_DIR = Path("output/student_extractor_gemma3_270m_positional_v4/merged_model")
 DEFAULT_OUTPUT_DIR = Path(
-    "output/student_extractor_gemma3_270m_compact_v2/test_evaluation"
+    "output/student_extractor_gemma3_270m_positional_v4/test_evaluation"
 )
 
 
@@ -257,9 +256,13 @@ def evaluate_record(
         if path in predicted_fields and predicted_fields[path] == value
     )
     applicant_count_match = bool(
-        isinstance(prediction, dict)
-        and isinstance(prediction.get("applicants"), list)
-        and len(prediction["applicants"]) == len(expected["applicants"])
+        isinstance(prediction, list)
+        and len(prediction) == 2
+        and isinstance(prediction[1], list)
+        and isinstance(expected, list)
+        and len(expected) == 2
+        and isinstance(expected[1], list)
+        and len(prediction[1]) == len(expected[1])
     )
     return PredictionResult(
         id=record.record_id,

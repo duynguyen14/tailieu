@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.ocr_review import OcrReviewDetail
 
-
 TEACHER_SCHEMA_VERSION = "compact-document-v1"
 
 
@@ -216,7 +215,7 @@ class TeacherStudentTrainingPreview(BaseModel):
     schema_version: str
     input_text: str
     user_prompt: str
-    compact_target: dict[str, Any]
+    compact_target: list[Any]
     schema_descriptor: dict[str, Any]
 
 

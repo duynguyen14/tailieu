@@ -56,21 +56,16 @@ def extraction() -> CompactDocumentExtraction:
     )
 
 
-def test_student_target_is_reduced_keyed_business_json() -> None:
+def test_student_target_is_reduced_positional_json() -> None:
     target = compact_document_to_student_target(extraction())
 
-    assert list(target) == ["note", "applicants"]
-    assert tuple(target["note"]) == STUDENT_NOTE_FIELDS
-    assert all(
-        tuple(applicant) == STUDENT_APPLICANT_FIELDS
-        for applicant in target["applicants"]
-    )
-    assert target["note"]["note_number"] == "850-2026"
-    assert "reference_number" not in target["note"]
-    assert target["applicants"][0]["passport_number"] == "RF0210530"
-    assert target["applicants"][0]["number_of_entries"] == "MULTIPLE"
-    assert "passport_issuing_authority" not in target["applicants"][0]
-    assert "relationship" not in target["applicants"][1]
+    assert len(target) == 2
+    assert len(target[0]) == len(STUDENT_NOTE_FIELDS)
+    assert all(len(row) == len(STUDENT_APPLICANT_FIELDS) for row in target[1])
+    assert target[0][0] == "850-2026"
+    assert target[1][0][0] == "Nicholas John Hogarth"
+    assert target[1][0][4] == "RF0210530"
+    assert target[1][0][9] == "MULTIPLE"
 
 
 def test_student_target_round_trip_restores_canonical_backend_fields() -> None:
@@ -85,20 +80,23 @@ def test_student_target_round_trip_restores_canonical_backend_fields() -> None:
     assert restored.applicants[0].person_id == "person_1"
     assert restored.applicants[0].sequence_number == 1
     assert restored.applicants[0].number_of_entries == "MULTIPLE"
+    assert restored.note.recipient_organization is None
+    assert restored.applicants[0].port_of_entry is None
+    assert restored.applicants[0].proposed_place_of_visa_collection is None
     assert restored.applicants[1].person_id == "person_2"
     assert restored.applicants[1].related_to_person_id is None
     assert restored.warnings == []
 
 
 def test_student_target_rejects_invalid_root_and_extra_fields() -> None:
-    with pytest.raises(ValueError, match="JSON object"):
+    with pytest.raises(ValueError, match="JSON array"):
         student_target_to_compact_document(
-            [["too short"], []], case_id="case-1", document_id="document-1"
+            {"not": "an array"}, case_id="case-1", document_id="document-1"
         )
 
     target = compact_document_to_student_target(extraction())
-    target["applicants"][0]["job_title"] = "field must be omitted"
-    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+    target[1][0].append("extra position")
+    with pytest.raises(ValueError, match="exactly 12 values"):
         student_target_to_compact_document(
             target, case_id="case-1", document_id="document-1"
         )
@@ -137,11 +135,12 @@ def test_training_record_uses_user_and_assistant_messages() -> None:
     assert "system" not in {message["role"] for message in record["messages"]}
 
 
-def test_prompt_contains_locked_positional_contract() -> None:
+def test_prompt_contains_locked_compact_contract() -> None:
     prompt = build_student_user_prompt("source")
-    assert "exactly one compact JSON object" in prompt
-    assert "visa_collection_place" in prompt
-    assert "Do not add IDs" in prompt
+    assert "positional JSON array" in prompt
+    assert "exactly 5 values" in prompt
+    assert "exactly 12 values" in prompt
+    assert "Do not add, remove, or reorder positions" in prompt
 
 
 def test_export_normalizes_internal_person_ids_and_stale_links() -> None:

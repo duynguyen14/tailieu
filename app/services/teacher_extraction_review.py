@@ -15,6 +15,13 @@ from app.db.models import (
     TeacherExtractionReview,
     utc_now,
 )
+from app.schemas.student_extraction import (
+    STUDENT_MODEL_ID,
+    STUDENT_SCHEMA_VERSION,
+    build_student_user_prompt,
+    compact_document_to_student_target,
+    student_schema_descriptor,
+)
 from app.schemas.teacher_extraction import (
     CompactDocumentExtraction,
     TeacherExtractionAttemptInfo,
@@ -26,13 +33,6 @@ from app.schemas.teacher_extraction import (
     TeacherExtractionReviewSaveResponse,
     TeacherExtractionReviewStats,
     TeacherStudentTrainingPreview,
-)
-from app.schemas.student_extraction import (
-    STUDENT_MODEL_ID,
-    STUDENT_SCHEMA_VERSION,
-    build_student_user_prompt,
-    compact_document_to_student_target,
-    student_schema_descriptor,
 )
 from app.services.ocr_review import OcrReviewService
 
@@ -283,7 +283,7 @@ class TeacherExtractionReviewService:
             # A reviewer must still be able to reopen and repair a loosely
             # structured JSON version. Approval/export can be handled after the
             # form has brought it back to the canonical shape.
-            compact_target = {}
+            compact_target = []
             preview_error = str(exc)
 
         approved_ocr_pages = self._ocr_review_service.get_document_pages_in_session(

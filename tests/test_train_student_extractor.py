@@ -30,10 +30,10 @@ def write_split(path: Path, split: str, record_id: str) -> None:
             {
                 "role": "assistant",
                 "content": json.dumps(
-                    {
-                        "note": {field: None for field in STUDENT_NOTE_FIELDS},
-                        "applicants": [],
-                    }
+                    [
+                        [None for _ in STUDENT_NOTE_FIELDS],
+                        [],
+                    ]
                 ),
             },
         ],
