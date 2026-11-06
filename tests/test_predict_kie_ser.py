@@ -2,7 +2,38 @@ from __future__ import annotations
 
 import pytest
 
-from tools.predict_kie_ser import decode_bio_entities
+from tools.predict_kie_ser import decode_bio_entities, model_inputs_to_device
+
+
+class FakeTensor:
+    def __init__(self) -> None:
+        self.device = None
+
+    def to(self, device):
+        self.device = device
+        return self
+
+
+def test_model_inputs_ignore_processor_overflow_metadata_lists() -> None:
+    input_ids = FakeTensor()
+    bbox = FakeTensor()
+    pixel_values = FakeTensor()
+    result = model_inputs_to_device(
+        {
+            "input_ids": input_ids,
+            "attention_mask": FakeTensor(),
+            "bbox": bbox,
+            "pixel_values": pixel_values,
+            "overflow_to_sample_mapping": [0, 0],
+            "overflowing_tokens": [[1, 2, 3]],
+        },
+        "cuda:0",
+    )
+
+    assert set(result) == {"input_ids", "attention_mask", "bbox", "pixel_values"}
+    assert input_ids.device == "cuda:0"
+    assert bbox.device == "cuda:0"
+    assert pixel_values.device == "cuda:0"
 
 
 def test_decode_bio_entities_repairs_orphan_i_and_merges_bbox() -> None:

@@ -17,6 +17,19 @@ DEFAULT_MODEL_DIR = Path("models/kie/ser/layoutlmv3_anotation_2_poc_v1")
 DEFAULT_DATASET_DIR = Path("data/training/kie_ser_anotation_2_poc_v1")
 DEFAULT_OUTPUT_FILE = Path("output/kie_ser_inference/predictions.jsonl")
 
+LAYOUTLMV3_MODEL_INPUT_KEYS = frozenset(
+    {
+        "input_ids",
+        "attention_mask",
+        "token_type_ids",
+        "bbox",
+        "pixel_values",
+        "position_ids",
+        "head_mask",
+        "inputs_embeds",
+    }
+)
+
 
 @dataclass(frozen=True)
 class PredictedEntity:
@@ -77,6 +90,37 @@ def read_jsonl(path: Path, limit: int = 0) -> list[dict[str, Any]]:
             if limit > 0 and len(records) >= limit:
                 break
     return records
+
+
+def model_inputs_to_device(
+    encoding: Any,
+    device: Any,
+) -> dict[str, Any]:
+    """Move only tensors accepted by LayoutLMv3 to the runtime device.
+
+    Newer Transformers processors can return overflow metadata as Python lists
+    even when ``return_tensors='pt'`` is used.  Passing or moving that metadata
+    as a model input causes ``list has no attribute to`` on Windows.
+    """
+
+    model_inputs: dict[str, Any] = {}
+    for key, value in encoding.items():
+        if key not in LAYOUTLMV3_MODEL_INPUT_KEYS:
+            continue
+        move = getattr(value, "to", None)
+        if not callable(move):
+            raise RuntimeError(
+                f"LayoutLMv3 processor returned non-tensor model input "
+                f"{key!r}: {type(value).__name__}."
+            )
+        model_inputs[key] = move(device)
+    missing = sorted({"input_ids", "bbox", "pixel_values"} - set(model_inputs))
+    if missing:
+        raise RuntimeError(
+            "LayoutLMv3 processor omitted required tensor input(s): "
+            + ", ".join(missing)
+        )
+    return model_inputs
 
 
 def decode_bio_entities(
@@ -208,11 +252,7 @@ class LayoutLmV3SerPredictor:
             )
         word_predictions: dict[int, tuple[str, float]] = {}
         chunk_count = int(encoding["input_ids"].shape[0])
-        model_inputs = {
-            key: value.to(self.device)
-            for key, value in encoding.items()
-            if key != "overflow_to_sample_mapping"
-        }
+        model_inputs = model_inputs_to_device(encoding, self.device)
         with torch.inference_mode():
             if self.device.type == "cuda":
                 with torch.autocast(device_type="cuda", dtype=torch.float16):
