@@ -842,7 +842,12 @@ class KiePageAnnotation(Base):
     image_width: Mapped[int] = mapped_column(Integer, nullable=False)
     image_height: Mapped[int] = mapped_column(Integer, nullable=False)
     orientation_angle: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    preprocess_metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # This JSON may contain multilingual OCR metadata.  Keep the ORM type
+    # Unicode so SQL Server binds it as NVARCHAR instead of replacing
+    # non-ASCII characters with ``?`` through a VARCHAR parameter.
+    preprocess_metadata_json: Mapped[str | None] = mapped_column(
+        Unicode(), nullable=True
+    )
     ser_status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING", index=True)
     re_status: Mapped[str] = mapped_column(String(20), nullable=False, default="BLOCKED", index=True)
     ser_reviewed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -864,8 +869,12 @@ class KieFieldProposal(Base):
     field_name: Mapped[str] = mapped_column(String(100), nullable=False)
     expected_value: Mapped[str | None] = mapped_column(Unicode(), nullable=True)
     match_status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    chosen_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    candidates_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    # Candidate JSON embeds OCR text and therefore must be Unicode on SQL
+    # Server.  ``Text`` maps/binds as VARCHAR in the pyodbc dialect.
+    chosen_json: Mapped[str | None] = mapped_column(Unicode(), nullable=True)
+    candidates_json: Mapped[str] = mapped_column(
+        Unicode(), nullable=False, default="[]"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
 
 
@@ -886,7 +895,10 @@ class KieEntityAnnotation(Base):
     field_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     applicant_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     token_ids_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    spans_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    # Character spans include their selected OCR text.
+    spans_json: Mapped[str] = mapped_column(
+        Unicode(), nullable=False, default="[]"
+    )
     x1: Mapped[int] = mapped_column(Integer, nullable=False)
     y1: Mapped[int] = mapped_column(Integer, nullable=False)
     x2: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -929,7 +941,8 @@ class KieAnnotationReview(Base):
     page_annotation_id: Mapped[str] = mapped_column(ForeignKey("kie_page_annotations.id", ondelete="CASCADE"), nullable=False, index=True)
     parent_review_id: Mapped[str | None] = mapped_column(ForeignKey("kie_annotation_reviews.id"), nullable=True)
     mode: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
-    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    # Human review snapshots contain multilingual entity values.
+    payload_json: Mapped[str] = mapped_column(Unicode(), nullable=False)
     reviewed_by: Mapped[str] = mapped_column(String(100), nullable=False)
     review_note: Mapped[str | None] = mapped_column(Unicode(), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
