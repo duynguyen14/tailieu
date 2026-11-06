@@ -8,6 +8,7 @@ from PIL import Image
 
 from tools.kie_ser_train_config import KieSerTrainSettings, parse_gpu_device_ids
 from tools.train_kie_ser import (
+    apply_warmup_training_argument,
     bio_entities,
     build_launch_command,
     calculate_bio_metrics,
@@ -122,3 +123,38 @@ def test_gpu_parser_rejects_duplicates() -> None:
     assert parse_gpu_device_ids("2, 3,4") == (2, 3, 4)
     with pytest.raises(ValueError, match="duplicate"):
         parse_gpu_device_ids("2,2")
+
+
+def test_warmup_uses_ratio_when_supported() -> None:
+    options: dict[str, object] = {}
+
+    apply_warmup_training_argument(
+        options,
+        parameters={"warmup_ratio": object()},
+        warmup_ratio=0.1,
+        train_item_count=100,
+        per_device_batch_size=2,
+        gradient_accumulation_steps=1,
+        world_size=2,
+        epochs=10,
+    )
+
+    assert options == {"warmup_ratio": 0.1}
+
+
+def test_warmup_falls_back_to_steps_for_transformers_v5() -> None:
+    options: dict[str, object] = {}
+
+    apply_warmup_training_argument(
+        options,
+        parameters={"warmup_steps": object()},
+        warmup_ratio=0.1,
+        train_item_count=100,
+        per_device_batch_size=2,
+        gradient_accumulation_steps=2,
+        world_size=2,
+        epochs=10,
+    )
+
+    # 100 / 2 ranks / batch 2 / accumulation 2 = 13 updates per epoch.
+    assert options == {"warmup_steps": 13}

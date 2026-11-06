@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import inspect
 import json
+import math
 import os
 import re
 import shutil
@@ -80,6 +81,40 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     return parser.parse_args()
+
+
+def apply_warmup_training_argument(
+    options: dict[str, Any],
+    *,
+    parameters: dict[str, inspect.Parameter] | Any,
+    warmup_ratio: float,
+    train_item_count: int,
+    per_device_batch_size: int,
+    gradient_accumulation_steps: int,
+    world_size: int,
+    epochs: float,
+) -> None:
+    """Set the warmup option supported by the installed Transformers version."""
+    if "warmup_ratio" in parameters:
+        options["warmup_ratio"] = warmup_ratio
+        return
+    if "warmup_steps" not in parameters:
+        if warmup_ratio:
+            raise RuntimeError(
+                "The installed Transformers TrainingArguments supports neither "
+                "warmup_ratio nor warmup_steps."
+            )
+        return
+
+    samples_per_rank = math.ceil(train_item_count / max(world_size, 1))
+    batches_per_rank = math.ceil(samples_per_rank / max(per_device_batch_size, 1))
+    updates_per_epoch = math.ceil(
+        batches_per_rank / max(gradient_accumulation_steps, 1)
+    )
+    total_steps = math.ceil(updates_per_epoch * epochs)
+    options["warmup_steps"] = (
+        max(1, math.ceil(total_steps * warmup_ratio)) if warmup_ratio > 0 else 0
+    )
 
 
 def _resolve(path: Path) -> Path:
@@ -765,7 +800,6 @@ def run_worker(settings: KieSerTrainSettings) -> None:
         "gradient_accumulation_steps": settings.kie_train_gradient_accumulation_steps,
         "learning_rate": settings.kie_train_learning_rate,
         "weight_decay": settings.kie_train_weight_decay,
-        "warmup_ratio": settings.kie_train_warmup_ratio,
         "lr_scheduler_type": "linear",
         "logging_strategy": "epoch",
         "eval_strategy": "epoch",
@@ -787,6 +821,16 @@ def run_worker(settings: KieSerTrainSettings) -> None:
         "optim": "adamw_torch",
     }
     parameters = inspect.signature(TrainingArguments.__init__).parameters
+    apply_warmup_training_argument(
+        options,
+        parameters=parameters,
+        warmup_ratio=settings.kie_train_warmup_ratio,
+        train_item_count=len(items_by_split["train"]),
+        per_device_batch_size=settings.kie_train_batch_size,
+        gradient_accumulation_steps=settings.kie_train_gradient_accumulation_steps,
+        world_size=world_size,
+        epochs=settings.kie_train_epochs,
+    )
     if "eval_strategy" not in parameters and "evaluation_strategy" in parameters:
         options["evaluation_strategy"] = options.pop("eval_strategy")
     if "overwrite_output_dir" in parameters:
