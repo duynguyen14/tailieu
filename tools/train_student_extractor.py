@@ -67,6 +67,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--learning-rate", type=float)
     parser.add_argument("--max-sequence-length", type=int)
     parser.add_argument("--checkpoint", type=Path)
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help=(
+            "Start from STUDENT_TRAIN_MODEL_ID and ignore model-dir/checkpoint "
+            "values inherited from .env. Use a new output directory."
+        ),
+    )
     parser.add_argument("--precision", choices=("bf16", "fp16", "fp32"))
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--prepare-only", action="store_true")
@@ -83,6 +91,8 @@ def _resolve(path: Path) -> Path:
 
 
 def apply_cli_overrides(args: argparse.Namespace) -> StudentExtractorTrainSettings:
+    if args.fresh and (args.model_dir is not None or args.checkpoint is not None):
+        raise ValueError("--fresh cannot be combined with --model-dir or --checkpoint")
     updates: dict[str, Any] = {}
     mapping = {
         "dataset_dir": "student_train_dataset_dir",
@@ -111,6 +121,9 @@ def apply_cli_overrides(args: argparse.Namespace) -> StudentExtractorTrainSettin
         updates["student_train_merge_after_train"] = False
     if args.offline:
         updates["student_train_offline"] = True
+    if args.fresh:
+        updates["student_train_model_dir"] = None
+        updates["student_train_resume_from_checkpoint"] = None
     return StudentExtractorTrainSettings(**updates)
 
 
@@ -773,6 +786,8 @@ def print_plan(
         f"Dataset: {dataset_summary.dataset_dir}\n"
         f"Splits: {dataset_summary.counts}\n"
         f"Model: {settings.model_path or settings.student_train_model_id}\n"
+        f"Initialization: {'local model' if settings.model_path else 'base model'}; "
+        f"resume={settings.resume_checkpoint_path or 'none'}\n"
         f"Device: {device_description}\n"
         f"Epochs: {settings.student_train_epochs}\n"
         f"Batch per GPU: {settings.student_train_batch_size}; "

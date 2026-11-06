@@ -5,8 +5,8 @@ import json
 import pytest
 
 from app.schemas.student_extraction import (
-    APPLICANT_FIELDS,
-    NOTE_FIELDS,
+    STUDENT_APPLICANT_FIELDS,
+    STUDENT_NOTE_FIELDS,
     build_student_user_prompt,
     compact_document_to_student_target,
     student_target_to_compact_document,
@@ -56,16 +56,21 @@ def extraction() -> CompactDocumentExtraction:
     )
 
 
-def test_student_target_has_fixed_lengths_and_one_based_relationship() -> None:
+def test_student_target_is_reduced_keyed_business_json() -> None:
     target = compact_document_to_student_target(extraction())
 
-    assert len(target) == 2
-    assert len(target[0]) == len(NOTE_FIELDS) == 7
-    assert all(len(applicant) == len(APPLICANT_FIELDS) == 20 for applicant in target[1])
-    assert target[0][0] == "850-2026"
-    assert target[1][0][4] == "RF0210530"
-    assert target[1][0][10] == "MULTIPLE"
-    assert target[1][1][19] == "SPOUSE"
+    assert list(target) == ["note", "applicants"]
+    assert tuple(target["note"]) == STUDENT_NOTE_FIELDS
+    assert all(
+        tuple(applicant) == STUDENT_APPLICANT_FIELDS
+        for applicant in target["applicants"]
+    )
+    assert target["note"]["note_number"] == "850-2026"
+    assert "reference_number" not in target["note"]
+    assert target["applicants"][0]["passport_number"] == "RF0210530"
+    assert target["applicants"][0]["number_of_entries"] == "MULTIPLE"
+    assert "passport_issuing_authority" not in target["applicants"][0]
+    assert "relationship" not in target["applicants"][1]
 
 
 def test_student_target_round_trip_restores_canonical_backend_fields() -> None:
@@ -85,15 +90,15 @@ def test_student_target_round_trip_restores_canonical_backend_fields() -> None:
     assert restored.warnings == []
 
 
-def test_student_target_rejects_invalid_shape_and_relationship() -> None:
-    with pytest.raises(ValueError, match="exactly 7"):
+def test_student_target_rejects_invalid_root_and_extra_fields() -> None:
+    with pytest.raises(ValueError, match="JSON object"):
         student_target_to_compact_document(
             [["too short"], []], case_id="case-1", document_id="document-1"
         )
 
     target = compact_document_to_student_target(extraction())
-    target[1][0][0] = {"unexpected": "object"}
-    with pytest.raises(ValueError, match="string or null"):
+    target["applicants"][0]["job_title"] = "field must be omitted"
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
         student_target_to_compact_document(
             target, case_id="case-1", document_id="document-1"
         )
@@ -134,9 +139,9 @@ def test_training_record_uses_user_and_assistant_messages() -> None:
 
 def test_prompt_contains_locked_positional_contract() -> None:
     prompt = build_student_user_prompt("source")
-    assert "exactly 7 positions" in prompt
-    assert "exactly 20 positions" in prompt
-    assert "must not appear in the response" in prompt
+    assert "exactly one compact JSON object" in prompt
+    assert "visa_collection_place" in prompt
+    assert "Do not add IDs" in prompt
 
 
 def test_export_normalizes_internal_person_ids_and_stale_links() -> None:

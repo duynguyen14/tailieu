@@ -31,7 +31,7 @@ from app.schemas.teacher_extraction import (
 )
 
 
-DEFAULT_OUTPUT_DIR = Path("data/training/gemma3_270m_compact_v1")
+DEFAULT_OUTPUT_DIR = Path("data/training/gemma3_270m_compact_v2")
 
 
 @dataclass(frozen=True)
@@ -45,7 +45,7 @@ class ExportExample:
     reviewed_by: str | None
     reviewed_at: str | None
     input_text: str
-    target: list[Any]
+    target: dict[str, Any]
     split: str
     record_hash: str
 
@@ -77,7 +77,7 @@ def canonical_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
-def record_hash(input_text: str, target: list[Any]) -> str:
+def record_hash(input_text: str, target: dict[str, Any]) -> str:
     material = {
         "schema_version": STUDENT_SCHEMA_VERSION,
         "input_text": input_text,
@@ -181,7 +181,7 @@ def manifest_record(example: ExportExample) -> dict[str, Any]:
         "split": example.split,
         "reviewed_by": example.reviewed_by,
         "reviewed_at": example.reviewed_at,
-        "applicant_count": len(example.target[1]),
+        "applicant_count": len(example.target["applicants"]),
         "input_characters": len(example.input_text),
         "target_characters": len(canonical_json(example.target)),
     }
@@ -226,7 +226,9 @@ def export_dataset(
         encoding="utf-8",
     )
 
-    applicant_distribution = Counter(len(example.target[1]) for example in examples)
+    applicant_distribution = Counter(
+        len(example.target["applicants"]) for example in examples
+    )
     fingerprint = hashlib.sha256(
         "".join(sorted(example.record_hash for example in examples)).encode("ascii")
     ).hexdigest()

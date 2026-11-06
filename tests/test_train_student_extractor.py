@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.schemas.student_extraction import STUDENT_SCHEMA_VERSION
+from app.schemas.student_extraction import (
+    STUDENT_NOTE_FIELDS,
+    STUDENT_SCHEMA_VERSION,
+)
 from tools.student_extractor_train_config import (
     StudentExtractorTrainSettings,
     parse_gpu_device_ids,
@@ -26,7 +29,12 @@ def write_split(path: Path, split: str, record_id: str) -> None:
             {"role": "user", "content": "DOCUMENT_TEXT:\nNo. 850-2026"},
             {
                 "role": "assistant",
-                "content": json.dumps([[None] * 7, []]),
+                "content": json.dumps(
+                    {
+                        "note": {field: None for field in STUDENT_NOTE_FIELDS},
+                        "applicants": [],
+                    }
+                ),
             },
         ],
     }
