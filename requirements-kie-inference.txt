@@ -1,0 +1,8 @@
+# LayoutLMv3 SER inference runtime. Install a CUDA-compatible PyTorch build
+# separately so this file never replaces a working CUDA wheel.
+-r requirements.txt
+
+transformers>=4.56,<6.0
+safetensors>=0.5,<1.0
+Pillow>=10.4,<13.0
+numpy>=1.26,<3.0
