@@ -489,7 +489,7 @@ def settings_environment(settings: KieSerTrainSettings) -> dict[str, str]:
         )
     if settings.kie_train_device == "gpu":
         environment["CUDA_VISIBLE_DEVICES"] = settings.kie_train_gpu_device_ids
-        environment.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+        environment.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
     if settings.kie_train_offline:
         environment["HF_HUB_OFFLINE"] = "1"
         environment["TRANSFORMERS_OFFLINE"] = "1"
@@ -536,15 +536,15 @@ def _encode_records(
     label_to_id: dict[str, int],
     maximum_length: int,
     fail_on_truncation: bool,
-) -> tuple[list[dict[str, Any]], list[list[int | None]], int]:
+) -> tuple[list[dict[str, Any]], list[tuple[int, list[int | None]]], int]:
     try:
         from PIL import Image
     except ImportError as error:
         raise RuntimeError("Pillow is required for LayoutLMv3 training") from error
     items: list[dict[str, Any]] = []
-    word_id_rows: list[list[int | None]] = []
-    truncated = 0
-    for index, record in enumerate(records, start=1):
+    chunk_metadata: list[tuple[int, list[int | None]]] = []
+    overflow_pages = 0
+    for record_index, record in enumerate(records):
         with Image.open(record.image_path) as image:
             encoding = processor(
                 images=image.convert("RGB"),
@@ -554,55 +554,84 @@ def _encode_records(
                 padding="max_length",
                 truncation=True,
                 max_length=maximum_length,
+                return_overflowing_tokens=True,
                 return_tensors="pt",
             )
-        word_ids = list(encoding.word_ids(batch_index=0))
-        included_words = {word_id for word_id in word_ids if word_id is not None}
+        chunk_count = int(encoding["input_ids"].shape[0])
+        if chunk_count > 1:
+            overflow_pages += 1
+        page_word_ids: set[int] = set()
+        for chunk_index in range(chunk_count):
+            word_ids = list(encoding.word_ids(batch_index=chunk_index))
+            page_word_ids.update(
+                word_id for word_id in word_ids if word_id is not None
+            )
+            item = {
+                key: value[chunk_index]
+                for key, value in encoding.items()
+                if key != "overflow_to_sample_mapping"
+            }
+            # A window can begin in the middle of a multi-word entity. It is a
+            # new sequence for the model, so normalize an orphan I-X to B-X.
+            supervised_positions = [
+                position
+                for position, label_id in enumerate(item["labels"].tolist())
+                if int(label_id) != -100
+            ]
+            if supervised_positions:
+                first_position = supervised_positions[0]
+                first_label = next(
+                    label
+                    for label, label_id in label_to_id.items()
+                    if label_id == int(item["labels"][first_position])
+                )
+                if first_label.startswith("I-"):
+                    beginning_label = f"B-{first_label[2:]}"
+                    item["labels"][first_position] = label_to_id[beginning_label]
+            items.append(item)
+            chunk_metadata.append((record_index, word_ids))
+        included_words = page_word_ids
         missing_words = len(record.words) - len(included_words)
         if missing_words:
-            truncated += 1
             if fail_on_truncation:
                 raise RuntimeError(
-                    f"Record {record.record_id} loses {missing_words}/{len(record.words)} "
-                    f"words at max_length={maximum_length}. Increase data chunking or "
-                    "rerun with --allow-truncation only for an intentional experiment."
+                    f"Record {record.record_id} still loses "
+                    f"{missing_words}/{len(record.words)} words after overflow chunking."
                 )
-        item = {
-            key: value.squeeze(0)
-            for key, value in encoding.items()
-            if key != "overflow_to_sample_mapping"
-        }
-        items.append(item)
-        word_id_rows.append(word_ids)
         print(
-            f"Encoded {index}/{len(records)}: id={record.record_id} "
-            f"words={len(record.words)} truncated={missing_words}"
+            f"Encoded {record_index + 1}/{len(records)}: id={record.record_id} "
+            f"words={len(record.words)} chunks={chunk_count} missing={missing_words}"
         )
-    return items, word_id_rows, truncated
+    return items, chunk_metadata, overflow_pages
 
 
 def _write_test_predictions(
     path: Path,
     *,
     records: list[SerRecord],
-    word_id_rows: list[list[int | None]],
+    chunk_metadata: list[tuple[int, list[int | None]]],
     predictions: Sequence[Sequence[int]],
     references: Sequence[Sequence[int]],
     id_to_label: dict[int, str],
 ) -> None:
+    predicted_by_record: list[dict[int, str]] = [{} for _ in records]
+    true_by_record: list[dict[int, str]] = [{} for _ in records]
+    for (record_index, word_ids), predicted_row, reference_row in zip(
+        chunk_metadata, predictions, references
+    ):
+        for position, word_id in enumerate(word_ids):
+            if word_id is None or int(reference_row[position]) == -100:
+                continue
+            predicted_by_record[record_index].setdefault(
+                word_id, id_to_label[int(predicted_row[position])]
+            )
+            true_by_record[record_index].setdefault(
+                word_id, id_to_label[int(reference_row[position])]
+            )
     with path.open("w", encoding="utf-8", newline="\n") as handle:
-        for record, word_ids, predicted_row, reference_row in zip(
-            records, word_id_rows, predictions, references
-        ):
-            predicted_by_word: dict[int, str] = {}
-            true_by_word: dict[int, str] = {}
-            for position, word_id in enumerate(word_ids):
-                if word_id is None or int(reference_row[position]) == -100:
-                    continue
-                predicted_by_word.setdefault(
-                    word_id, id_to_label[int(predicted_row[position])]
-                )
-                true_by_word.setdefault(word_id, id_to_label[int(reference_row[position])])
+        for record_index, record in enumerate(records):
+            predicted_by_word = predicted_by_record[record_index]
+            true_by_word = true_by_record[record_index]
             included = sorted(true_by_word)
             payload = {
                 "id": record.record_id,
@@ -664,10 +693,10 @@ def run_worker(settings: KieSerTrainSettings) -> None:
         split: _load_split(summary, split) for split in ("train", "val", "test")
     }
     items_by_split: dict[str, list[dict[str, Any]]] = {}
-    word_ids_by_split: dict[str, list[list[int | None]]] = {}
-    truncation_counts: dict[str, int] = {}
+    chunk_metadata_by_split: dict[str, list[tuple[int, list[int | None]]]] = {}
+    overflow_page_counts: dict[str, int] = {}
     for split in ("train", "val", "test"):
-        items, word_ids, truncated = _encode_records(
+        items, chunk_metadata, overflow_pages = _encode_records(
             records_by_split[split],
             processor=processor,
             label_to_id=label_to_id,
@@ -675,8 +704,8 @@ def run_worker(settings: KieSerTrainSettings) -> None:
             fail_on_truncation=settings.kie_train_fail_on_truncation,
         )
         items_by_split[split] = items
-        word_ids_by_split[split] = word_ids
-        truncation_counts[split] = truncated
+        chunk_metadata_by_split[split] = chunk_metadata
+        overflow_page_counts[split] = overflow_pages
 
     class EncodedDataset(Dataset):
         def __init__(self, items: list[dict[str, Any]]) -> None:
@@ -815,7 +844,7 @@ def run_worker(settings: KieSerTrainSettings) -> None:
         _write_test_predictions(
             settings.output_path / "test_predictions.jsonl",
             records=records_by_split["test"],
-            word_id_rows=word_ids_by_split["test"],
+            chunk_metadata=chunk_metadata_by_split["test"],
             predictions=test_predictions,
             references=test_output.label_ids,
             id_to_label=id_to_label,
@@ -832,7 +861,10 @@ def run_worker(settings: KieSerTrainSettings) -> None:
             "precision": precision,
             "world_size": world_size,
             "effective_batch_size": effective_batch,
-            "truncated_pages": truncation_counts,
+            "overflow_pages": overflow_page_counts,
+            "encoded_chunks": {
+                split: len(items) for split, items in items_by_split.items()
+            },
             "best_checkpoint": trainer.state.best_model_checkpoint,
             "best_model": str(best_model_dir),
             "train_metrics": train_result.metrics,
