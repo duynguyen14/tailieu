@@ -1,0 +1,10 @@
+# KIE/SER training dependencies. Install a CUDA-compatible PyTorch build
+# separately so this file never replaces the server's working Torch wheel.
+-r requirements.txt
+
+transformers>=4.56,<6.0
+accelerate>=1.10,<2.0
+huggingface-hub>=0.34,<2.0
+safetensors>=0.5,<1.0
+Pillow>=10.4,<13.0
+numpy>=1.26,<3.0
