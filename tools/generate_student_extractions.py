@@ -41,7 +41,7 @@ from tools.generate_teacher_extractions import (
     select_candidates,
 )
 
-DEFAULT_MODEL_DIR = Path("models/student_extractor/gemma3_270m_shortkey_v7/merged_model")
+DEFAULT_MODEL_DIR = Path("models/student_extractor/gemma3_270m_shortkey_v8/merged_model")
 PROMPT_VERSION = f"student-local-{STUDENT_SCHEMA_VERSION}"
 LOCAL_ENDPOINT = "local://transformers"
 

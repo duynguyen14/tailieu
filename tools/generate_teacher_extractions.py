@@ -29,8 +29,8 @@ from app.db.models import (
     utc_now,
 )
 from app.schemas.teacher_extraction import (
-    TEACHER_SCHEMA_VERSION,
     CompactDocumentExtraction,
+    TEACHER_SCHEMA_VERSION,
 )
 
 
@@ -54,6 +54,12 @@ never copy a port of entry, airport or border gate into it unless the source
 explicitly states that the visa will be collected there.
 port_of_entry is only an explicitly stated arrival airport, border gate or port;
 never use a visa collection location as port_of_entry.
+request_type_code must be one of CAP_MOI, GIA_HAN, CHUYEN_THI_THUC or KHAC.
+Use CHUYEN_THI_THUC when the request explicitly asks for a visa to be issued or
+transferred onto a new/replacement passport. Otherwise use GIA_HAN whenever
+the request includes extension/renewal of a visa, temporary residence or stay
+permit, including a mixed request that also asks for a new visa. Use CAP_MOI for
+ordinary visa issuance/approval. Use KHAC for non-visa or unclear requests.
 Assign stable person IDs person_1, person_2, ... in source reading order.
 related_to_person_id must be null unless it references an existing, different
 person_id in the same response. Never invent a missing related person.

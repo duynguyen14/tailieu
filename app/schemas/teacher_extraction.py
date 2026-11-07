@@ -9,6 +9,13 @@ from app.schemas.ocr_review import OcrReviewDetail
 
 TEACHER_SCHEMA_VERSION = "compact-document-v1"
 
+RequestTypeCode = Literal[
+    "CAP_MOI",
+    "GIA_HAN",
+    "CHUYEN_THI_THUC",
+    "KHAC",
+]
+
 
 class CompactDiplomaticNote(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -23,6 +30,15 @@ class CompactDiplomaticNote(BaseModel):
     sender_organization: str | None = None
     recipient_organization: str | None = None
     request_type: str | None = None
+    request_type_code: RequestTypeCode | None = Field(
+        default=None,
+        description=(
+            "Normalized request category. Use CAP_MOI for ordinary visa issuance, "
+            "GIA_HAN whenever the request includes a visa/residence extension, "
+            "CHUYEN_THI_THUC when a visa must be issued/transferred onto a new "
+            "passport, and KHAC for non-visa or unclear requests."
+        ),
+    )
 
 
 class CompactApplicant(BaseModel):

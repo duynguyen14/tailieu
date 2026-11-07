@@ -37,9 +37,9 @@ class StudentExtractorTrainSettings(BaseSettings):
 
     student_train_model_id: str = "google/gemma-3-270m-it"
     student_train_model_dir: Path | None = None
-    student_train_dataset_dir: Path = Path("data/training/gemma3_270m_shortkey_v7")
+    student_train_dataset_dir: Path = Path("data/training/gemma3_270m_shortkey_v8")
     student_train_output_dir: Path = Path(
-        "output/student_extractor_gemma3_270m_shortkey_v7"
+        "output/student_extractor_gemma3_270m_shortkey_v8"
     )
     student_train_device: str = "gpu"
     student_train_gpu_device_ids: str = "2,3,4"
