@@ -111,6 +111,15 @@ def parse_args() -> argparse.Namespace:
             "current preprocessing version"
         ),
     )
+    parser.add_argument(
+        "--rerun-unreviewed",
+        action="store_true",
+        help=(
+            "Rerun every eligible page that has no historical OCR review, "
+            "including pages with an existing completed OCR run. Reviewed "
+            "OCR pages are never selected."
+        ),
+    )
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default=None)
     return parser.parse_args()
 
@@ -125,6 +134,7 @@ def eligible_pages(
     force: bool,
     pending_review_only: bool,
     preprocess_version: str,
+    rerun_unreviewed: bool = False,
 ) -> list[AnnotationPage]:
     with database.session() as session:
         active_case_page = (
@@ -148,13 +158,16 @@ def eligible_pages(
         )
         if page_id:
             statement = statement.where(AnnotationPage.id == page_id)
-        if pending_review_only:
+        if pending_review_only or rerun_unreviewed:
             historical_review_exists = (
                 select(OcrReview.id)
                 .join(OcrRun, OcrRun.id == OcrReview.ocr_run_id)
                 .where(OcrRun.page_id == AnnotationPage.id)
                 .exists()
             )
+        if rerun_unreviewed:
+            statement = statement.where(~historical_review_exists)
+        elif pending_review_only:
             current_preprocess_exists = (
                 select(OcrRun.id)
                 .where(
@@ -299,8 +312,15 @@ def fail_run(
 def run(args: argparse.Namespace) -> OcrSummary:
     if args.limit < 0:
         raise ValueError("--limit must be zero or greater")
-    if args.force and args.pending_review_only:
-        raise ValueError("--force cannot be combined with --pending-review-only")
+    if args.force and (args.pending_review_only or args.rerun_unreviewed):
+        raise ValueError(
+            "--force cannot be combined with --pending-review-only or "
+            "--rerun-unreviewed"
+        )
+    if args.pending_review_only and args.rerun_unreviewed:
+        raise ValueError(
+            "--pending-review-only and --rerun-unreviewed are mutually exclusive"
+        )
     settings = get_settings()
     preprocess_version = effective_preprocess_version(settings)
     database = Database(settings)
@@ -316,6 +336,7 @@ def run(args: argparse.Namespace) -> OcrSummary:
             force=args.force,
             pending_review_only=args.pending_review_only,
             preprocess_version=preprocess_version,
+            rerun_unreviewed=args.rerun_unreviewed,
         )
         summary.discovered = len(pages)
         if not pages:

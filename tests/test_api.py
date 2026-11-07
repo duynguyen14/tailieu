@@ -1269,6 +1269,20 @@ def test_pending_review_ocr_excludes_reviewed_and_skipped_pages() -> None:
 
         assert already_processed == []
 
+        rerunnable_unreviewed = eligible_pages(
+            client.app.state.database,
+            page_types=["DIPLOMATIC_NOTE", "APPLICANT_TABLE", "APPLICANT_LIST"],
+            page_id=None,
+            case_id=None,
+            limit=0,
+            force=False,
+            pending_review_only=False,
+            preprocess_version="orientation-v1",
+            rerun_unreviewed=True,
+        )
+
+        assert [page.id for page in rerunnable_unreviewed] == [pending_page["id"]]
+
 
 def test_extract_returns_two_typed_pages() -> None:
     with _client() as client:
