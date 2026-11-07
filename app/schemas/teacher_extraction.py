@@ -163,6 +163,44 @@ class CompactDocumentExtraction(BaseModel):
         return self
 
 
+class TeacherBusinessNoteV8(BaseModel):
+    """Only note fields the production student and review UI consume."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    note_number: str | None
+    sender_organization: str | None
+    request_type_code: RequestTypeCode | None
+
+
+class TeacherBusinessApplicantV8(BaseModel):
+    """Only applicant fields the production student and review UI consume."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    full_name: str | None
+    date_of_birth: str | None
+    gender: str | None
+    nationality: str | None
+    passport_number: str | None
+    passport_type: str | None
+    passport_issue_date: str | None
+    passport_expiration: str | None
+    visa_type: str | None
+    number_of_entries: str | None
+    entry_date: str | None
+    exit_date: str | None
+
+
+class TeacherBusinessOutputV8(BaseModel):
+    """Minimal teacher response; immutable IDs are injected by the backend."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    note: TeacherBusinessNoteV8
+    applicants: list[TeacherBusinessApplicantV8]
+
+
 TeacherReviewDecision = Literal["PENDING", "APPROVED", "REJECTED"]
 
 
@@ -243,6 +281,7 @@ class TeacherExtractionReviewDetail(BaseModel):
     input_text: str
     reviewed_output: dict[str, Any]
     approved_ocr_pages: list[OcrReviewDetail] = Field(default_factory=list)
+    review_form_schema: dict[str, Any]
     student_training: TeacherStudentTrainingPreview
     raw_response: dict[str, Any] | list[Any] | str | None
     validation_errors: dict[str, Any] | list[Any] | str | None

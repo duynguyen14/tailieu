@@ -9,6 +9,8 @@ from app.schemas.student_extraction import (
     STUDENT_NOTE_FIELDS,
     build_student_user_prompt,
     compact_document_to_student_target,
+    normalize_review_output_for_student_v8,
+    review_form_schema_descriptor,
     student_target_to_compact_document,
 )
 from app.schemas.teacher_extraction import CompactDocumentExtraction
@@ -98,6 +100,49 @@ def test_student_target_round_trip_restores_canonical_backend_fields() -> None:
     assert restored.applicants[1].person_id == "person_2"
     assert restored.applicants[1].related_to_person_id is None
     assert restored.warnings == []
+
+
+def test_review_form_schema_and_payload_are_limited_to_v8_fields() -> None:
+    source = extraction().model_dump(mode="json")
+    source["note"].update(
+        recipient_organization="legacy recipient",
+        request_type="legacy free text",
+    )
+    source["applicants"][0].update(
+        occupation="legacy occupation",
+        organization="legacy organization",
+        port_of_entry="legacy airport",
+    )
+
+    normalized = normalize_review_output_for_student_v8(
+        source,
+        case_id="case-locked",
+        document_id="document-locked",
+    )
+    descriptor = review_form_schema_descriptor()
+
+    assert list(normalized["note"]) == list(STUDENT_NOTE_FIELDS)
+    assert normalized["note"]["request_type_code"] == "CAP_MOI"
+    assert "recipient_organization" not in normalized["note"]
+    assert "request_type" not in normalized["note"]
+    assert set(normalized["applicants"][0]) == {
+        "person_id",
+        "sequence_number",
+        *STUDENT_APPLICANT_FIELDS,
+    }
+    assert "occupation" not in normalized["applicants"][0]
+    assert "organization" not in normalized["applicants"][0]
+    assert "port_of_entry" not in normalized["applicants"][0]
+    assert normalized["case_id"] == "case-locked"
+    assert normalized["document_id"] == "document-locked"
+    assert descriptor["note_fields"] == list(STUDENT_NOTE_FIELDS)
+    assert descriptor["applicant_fields"] == list(STUDENT_APPLICANT_FIELDS)
+    assert [item["value"] for item in descriptor["request_type_options"]] == [
+        "CAP_MOI",
+        "GIA_HAN",
+        "CHUYEN_THI_THUC",
+        "KHAC",
+    ]
 
 
 def test_student_target_rejects_invalid_root_and_extra_fields() -> None:

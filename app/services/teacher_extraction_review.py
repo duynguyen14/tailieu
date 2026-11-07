@@ -19,6 +19,8 @@ from app.schemas.student_extraction import (
     STUDENT_SCHEMA_VERSION,
     build_student_user_prompt,
     compact_document_to_student_target,
+    normalize_review_output_for_student_v8,
+    review_form_schema_descriptor,
     student_schema_descriptor,
 )
 from app.schemas.teacher_extraction import (
@@ -90,8 +92,8 @@ class TeacherExtractionReviewService:
                     active_review_exists,
                 )
                 .order_by(
-                    TeacherExtractionJob.created_at.asc(),
-                    TeacherExtractionJob.id.asc(),
+                    TeacherExtractionJob.created_at.desc(),
+                    TeacherExtractionJob.id.desc(),
                 )
             )
 
@@ -121,8 +123,8 @@ class TeacherExtractionReviewService:
                             TeacherExtractionJob.id.in_(range_job_ids),
                         )
                         .order_by(
-                            TeacherExtractionJob.created_at.asc(),
-                            TeacherExtractionJob.id.asc(),
+                            TeacherExtractionJob.created_at.desc(),
+                            TeacherExtractionJob.id.desc(),
                         )
                         .limit(1)
                     )
@@ -141,8 +143,8 @@ class TeacherExtractionReviewService:
                         TeacherExtractionJob.is_active == true(),
                     )
                     .order_by(
-                        TeacherExtractionJob.created_at.asc(),
-                        TeacherExtractionJob.id.asc(),
+                        TeacherExtractionJob.created_at.desc(),
+                        TeacherExtractionJob.id.desc(),
                     )
                     .limit(1)
                 )
@@ -193,13 +195,15 @@ class TeacherExtractionReviewService:
                 raise TeacherExtractionReviewConflictError(
                     "This teacher review belongs to an obsolete teacher job."
                 )
-            # The review form is the source of truth. Persist its JSON without
-            # running the teacher schema validator again; only immutable source
-            # identifiers are enforced by the server.
-            reviewed_output = dict(payload.reviewed_output)
-            reviewed_output["case_id"] = current.job.case_id
-            reviewed_output["document_id"] = current.job.document_id
-            reviewed_output.setdefault("schema_version", current.job.schema_version)
+            # The review form is the source of truth. Keep validation permissive,
+            # but persist only the business fields consumed by student schema v8;
+            # immutable source identifiers are always enforced by the server.
+            reviewed_output = normalize_review_output_for_student_v8(
+                payload.reviewed_output,
+                case_id=current.job.case_id,
+                document_id=current.job.document_id,
+                teacher_schema_version=current.job.schema_version,
+            )
 
             now = utc_now()
             session.execute(
@@ -269,11 +273,17 @@ class TeacherExtractionReviewService:
     ) -> TeacherExtractionReviewDetail:
         job = review.job
         attempt = review.source_attempt
-        output = self._json_value(review.reviewed_output_json)
-        if not isinstance(output, dict):
+        stored_output = self._json_value(review.reviewed_output_json)
+        if not isinstance(stored_output, dict):
             raise TeacherExtractionReviewConflictError(
                 "Stored teacher review output is not a JSON object."
             )
+        output = normalize_review_output_for_student_v8(
+            stored_output,
+            case_id=job.case_id,
+            document_id=job.document_id,
+            teacher_schema_version=job.schema_version,
+        )
         preview_error: str | None = None
         try:
             extraction = CompactDocumentExtraction.model_validate(output)
@@ -340,6 +350,7 @@ class TeacherExtractionReviewService:
             input_text=job.input_text,
             reviewed_output=output,
             approved_ocr_pages=approved_ocr_pages,
+            review_form_schema=review_form_schema_descriptor(),
             student_training=TeacherStudentTrainingPreview(
                 model_id=STUDENT_MODEL_ID,
                 schema_version=STUDENT_SCHEMA_VERSION,

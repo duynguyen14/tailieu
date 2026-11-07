@@ -212,6 +212,26 @@ class Settings(BaseSettings):
     teacher_use_json_mode: bool = True
     teacher_max_input_chars: int = Field(default=50_000, ge=1000, le=500_000)
 
+    # Stateless production PDF -> validated business JSON endpoint.  The
+    # runtime is deliberately opt-in because enabling it reserves GPU memory
+    # for the classifier, orientation model, Paddle OCR and Gemma for the
+    # entire API process lifetime.
+    production_extraction_enabled: bool = False
+    production_warmup_models: bool = True
+    production_require_gpu: bool = True
+    production_gpu_device_id: int = Field(default=0, ge=0)
+    production_student_model_dir: Path = Path(
+        "models/student_extractor/gemma3_270m_shortkey_v8/merged_model"
+    )
+    production_student_precision: str = "bf16"
+    production_student_max_input_tokens: int = Field(default=4096, ge=256, le=32768)
+    production_student_max_new_tokens: int = Field(default=512, ge=32, le=4096)
+    production_ocr_page_types: str = (
+        "DIPLOMATIC_NOTE,APPLICANT_TABLE,APPLICANT_LIST"
+    )
+    production_ocr_enable_refinement: bool = False
+    production_include_reconstructed_text: bool = False
+
     pdf_dpi: int = Field(default=200, ge=72, le=400)
     max_file_size_mb: int = Field(default=30, ge=1, le=500)
     max_pages: int = Field(default=50, ge=1, le=1000)
@@ -236,6 +256,16 @@ class Settings(BaseSettings):
     @classmethod
     def normalize_log_level(cls, value: str) -> str:
         return value.upper().strip()
+
+    @field_validator("production_student_precision")
+    @classmethod
+    def validate_production_student_precision(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"auto", "bf16", "fp16", "fp32"}:
+            raise ValueError(
+                "PRODUCTION_STUDENT_PRECISION must be auto, bf16, fp16, or fp32."
+            )
+        return normalized
 
     @field_validator(
         "page_classifier_model_path",
@@ -348,6 +378,18 @@ class Settings(BaseSettings):
         if not base_url.startswith(("http://", "https://")):
             raise ValueError("TEACHER_API_BASE_URL must start with http:// or https://")
         return f"{base_url}/chat/completions"
+
+    @property
+    def production_student_model_path(self) -> Path:
+        return self.resolve_project_path(self.production_student_model_dir)
+
+    @property
+    def production_ocr_page_type_list(self) -> list[str]:
+        return [
+            item.strip().upper()
+            for item in self.production_ocr_page_types.split(",")
+            if item.strip()
+        ]
 
     @property
     def annotation_storage_path(self) -> Path:

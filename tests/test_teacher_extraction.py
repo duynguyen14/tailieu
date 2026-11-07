@@ -58,6 +58,32 @@ def valid_payload() -> dict:
     }
 
 
+def valid_business_payload() -> dict:
+    return {
+        "note": {
+            "note_number": "850-2026",
+            "sender_organization": "Embassy of Australia",
+            "request_type_code": "CAP_MOI",
+        },
+        "applicants": [
+            {
+                "full_name": "Nicholas John Hogarth",
+                "date_of_birth": "1976-10-14",
+                "gender": "Male",
+                "nationality": "Australian",
+                "passport_number": "RF0210530",
+                "passport_type": "Ordinary",
+                "passport_issue_date": None,
+                "passport_expiration": "2030-11-13",
+                "visa_type": "NG4",
+                "number_of_entries": "MULTIPLE",
+                "entry_date": None,
+                "exit_date": None,
+            }
+        ],
+    }
+
+
 def test_extract_json_object_accepts_plain_and_fenced_json() -> None:
     assert extract_json_object('{"value":1}') == {"value": 1}
     assert extract_json_object('```json\n{"value":2}\n```') == {"value": 2}
@@ -78,24 +104,27 @@ def test_compact_schema_rejects_duplicate_person_ids_and_invalid_links() -> None
 
 
 def test_validate_teacher_output_checks_source_identifiers() -> None:
-    result = validate_teacher_output(json.dumps(valid_payload()), candidate=candidate())
-    assert '"note_number":"850-2026"' in result
-    assert '"passport_expiration":null' in result
-    assert '"passport_type":null' in result
-    assert '"proposed_place_of_visa_collection":null' in result
-    assert '"passport_issue_date":null' in result
-    assert '"passport_issuing_authority":null' in result
-    assert '"port_of_entry":null' in result
-
-    mismatched = valid_payload()
-    mismatched["case_id"] = "wrong-case"
-    with pytest.raises(ValueError, match="case_id mismatch"):
-        validate_teacher_output(json.dumps(mismatched), candidate=candidate())
+    result = json.loads(
+        validate_teacher_output(
+            json.dumps(valid_business_payload()), candidate=candidate()
+        )
+    )
+    assert result["case_id"] == "case-1"
+    assert result["document_id"] == "document-1"
+    assert result["note"] == {
+        "note_number": "850-2026",
+        "sender_organization": "Embassy of Australia",
+        "request_type_code": "CAP_MOI",
+    }
+    assert result["applicants"][0]["person_id"] == "person_1"
+    assert result["applicants"][0]["sequence_number"] == 1
+    assert result["applicants"][0]["passport_type"] == "Ordinary"
+    assert "occupation" not in result["applicants"][0]
+    assert result["warnings"] == []
 
 
 def test_validate_teacher_output_accepts_passport_type() -> None:
-    payload = valid_payload()
-    payload["applicants"][0]["passport_type"] = "Ordinary"
+    payload = valid_business_payload()
 
     result = json.loads(
         validate_teacher_output(json.dumps(payload), candidate=candidate())
@@ -104,16 +133,12 @@ def test_validate_teacher_output_accepts_passport_type() -> None:
     assert result["applicants"][0]["passport_type"] == "Ordinary"
 
 
-def test_validate_teacher_output_drops_dangling_person_link_with_warning() -> None:
-    payload = valid_payload()
-    payload["applicants"][0]["related_to_person_id"] = "person_3"
+def test_validate_teacher_output_rejects_legacy_business_fields() -> None:
+    payload = valid_business_payload()
+    payload["applicants"][0]["occupation"] = "legacy field"
 
-    result = json.loads(
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         validate_teacher_output(json.dumps(payload), candidate=candidate())
-    )
-
-    assert result["applicants"][0]["related_to_person_id"] is None
-    assert "Dropped invalid related_to_person_id" in result["warnings"][0]
 
 
 def test_teacher_input_hash_is_deterministic_and_versioned() -> None:
@@ -129,10 +154,11 @@ def test_teacher_input_hash_is_deterministic_and_versioned() -> None:
 def test_build_messages_contains_schema_ids_and_reconstructed_text() -> None:
     messages = build_messages(candidate(), settings())
     assert messages[0]["role"] == "system"
-    assert "CASE_ID: case-1" in messages[1]["content"]
-    assert "DOCUMENT_ID: document-1" in messages[1]["content"]
     assert "Nicholas John Hogarth" in messages[1]["content"]
     assert "OUTPUT_JSON_SCHEMA" in messages[1]["content"]
+    assert "business-v8" in messages[1]["content"]
+    assert "occupation" not in messages[1]["content"]
+    assert "recipient_organization" not in messages[1]["content"]
 
 
 def test_call_teacher_validates_openai_compatible_response(monkeypatch) -> None:
@@ -144,7 +170,9 @@ def test_call_teacher_validates_openai_compatible_response(monkeypatch) -> None:
             return {
                 "choices": [
                     {
-                        "message": {"content": json.dumps(valid_payload())},
+                        "message": {
+                            "content": json.dumps(valid_business_payload())
+                        },
                         "finish_reason": "stop",
                     }
                 ],
@@ -184,7 +212,7 @@ def test_call_teacher_validates_openai_compatible_response(monkeypatch) -> None:
 
 
 def test_call_teacher_serializes_validation_errors_without_crashing(monkeypatch) -> None:
-    invalid_payload = valid_payload()
+    invalid_payload = valid_business_payload()
     invalid_payload["applicants"][0]["unexpected_field"] = "invalid"
 
     class FakeResponse:

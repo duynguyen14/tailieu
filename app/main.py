@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -9,6 +10,7 @@ from app.api.annotation_routes import router as annotation_router
 from app.api.ocr_review_routes import router as ocr_review_router
 from app.api.kie_review_routes import router as kie_review_router
 from app.api.page_label_audit_routes import router as page_label_audit_router
+from app.api.production_extraction_routes import router as production_extraction_router
 from app.api.routes import router
 from app.api.table_annotation_routes import router as table_annotation_router
 from app.api.teacher_extraction_routes import router as teacher_extraction_router
@@ -24,10 +26,13 @@ from app.services.kie_review import KieReviewService
 from app.services.page_label_audit import PageLabelAuditService
 from app.services.pdf_renderer import PdfRenderer
 from app.services.pipeline import DocumentPipeline
+from app.services.production_extraction import ProductionExtractionService
 from app.services.storage import AnnotationStorage
 from app.services.table_annotation import TableAnnotationService
 from app.services.teacher_extraction_review import TeacherExtractionReviewService
 from app.services.text_reconstruction_review import TextReconstructionReviewService
+
+LOGGER = logging.getLogger(__name__)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -72,12 +77,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ocr_review_service=ocr_review_service,
     )
     kie_review_service = KieReviewService(database=database, storage=annotation_storage)
+    production_extraction_service = ProductionExtractionService(settings, renderer)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         try:
+            if settings.production_extraction_enabled:
+                try:
+                    production_extraction_service.initialize()
+                except Exception:
+                    # Keep the process alive so orchestration can read the
+                    # readiness error. Extraction requests remain rejected.
+                    LOGGER.exception("Production model preload failed")
             yield
         finally:
+            production_extraction_service.close()
             database.close()
 
     pipeline = DocumentPipeline(
@@ -115,6 +129,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.text_reconstruction_review_service = text_reconstruction_review_service
     app.state.teacher_extraction_review_service = teacher_extraction_review_service
     app.state.kie_review_service = kie_review_service
+    app.state.production_extraction_service = production_extraction_service
     app.include_router(router, prefix=settings.api_prefix)
     app.include_router(annotation_router, prefix=settings.api_prefix)
     app.include_router(page_label_audit_router, prefix=settings.api_prefix)
@@ -123,6 +138,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(text_reconstruction_router, prefix=settings.api_prefix)
     app.include_router(teacher_extraction_router, prefix=settings.api_prefix)
     app.include_router(kie_review_router, prefix=settings.api_prefix)
+    app.include_router(production_extraction_router, prefix=settings.api_prefix)
     return app
 
 

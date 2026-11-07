@@ -1,0 +1,11 @@
+# Production PDF -> JSON API. Install a CUDA-enabled PyTorch wheel compatible
+# with this host before this file; never let pip silently replace it with CPU
+# Torch.  The Paddle wheel below targets CUDA 12.6.
+-r requirements-ocr-gpu.txt
+
+onnxruntime-gpu>=1.20,<2.0
+transformers>=4.56,<6.0
+accelerate>=1.10,<2.0
+safetensors>=0.5,<1.0
+sentencepiece>=0.2,<1.0
+

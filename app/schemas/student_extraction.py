@@ -152,6 +152,85 @@ def student_schema_descriptor() -> dict[str, Any]:
     }
 
 
+def review_form_schema_descriptor() -> dict[str, Any]:
+    """Describe the human-review form that feeds the v8 student target.
+
+    The teacher JSON is intentionally richer than the production student
+    contract.  Keeping this descriptor beside the student field constants
+    gives the API and UI one canonical list and prevents removed teacher-only
+    fields from leaking back into the review form.
+    """
+
+    return {
+        "schema_version": STUDENT_SCHEMA_VERSION,
+        "note_fields": list(STUDENT_NOTE_FIELDS),
+        "applicant_fields": list(STUDENT_APPLICANT_FIELDS),
+        "request_type_options": [
+            {"value": "CAP_MOI", "label": "Cấp mới"},
+            {"value": "GIA_HAN", "label": "Gia hạn"},
+            {"value": "CHUYEN_THI_THUC", "label": "Chuyển thị thực"},
+            {"value": "KHAC", "label": "Khác"},
+        ],
+    }
+
+
+def normalize_review_output_for_student_v8(
+    payload: Any,
+    *,
+    case_id: str,
+    document_id: str,
+    teacher_schema_version: str = "compact-document-v1",
+) -> dict[str, Any]:
+    """Project a teacher review onto only the business fields used by v8.
+
+    IDs required by the teacher storage model remain in the payload but are
+    derived when absent.  Legacy optional fields are deliberately discarded,
+    so saving the form cannot reintroduce data that the student model never
+    consumes.
+    """
+
+    source = payload if isinstance(payload, dict) else {}
+    note_source = source.get("note")
+    if not isinstance(note_source, dict):
+        note_source = {}
+
+    applicant_source = source.get("applicants")
+    if not isinstance(applicant_source, list):
+        applicant_source = []
+
+    applicants: list[dict[str, Any]] = []
+    for index, raw_applicant in enumerate(applicant_source, start=1):
+        applicant = raw_applicant if isinstance(raw_applicant, dict) else {}
+        person_id = applicant.get("person_id")
+        if not isinstance(person_id, str) or not person_id.strip():
+            person_id = f"person_{index}"
+        sequence_number = applicant.get("sequence_number")
+        if sequence_number is None:
+            sequence_number = index
+        applicants.append(
+            {
+                "person_id": person_id,
+                "sequence_number": sequence_number,
+                **{
+                    field: applicant.get(field)
+                    for field in STUDENT_APPLICANT_FIELDS
+                },
+            }
+        )
+
+    return {
+        "schema_version": teacher_schema_version,
+        "case_id": case_id,
+        "document_id": document_id,
+        "note": {
+            field: note_source.get(field)
+            for field in STUDENT_NOTE_FIELDS
+        },
+        "applicants": applicants,
+        "warnings": [],
+    }
+
+
 def compact_document_to_student_target(
     extraction: CompactDocumentExtraction,
 ) -> StudentTarget:
@@ -273,6 +352,8 @@ __all__ = [
     "StudentDocumentTarget",
     "build_student_user_prompt",
     "compact_document_to_student_target",
+    "normalize_review_output_for_student_v8",
+    "review_form_schema_descriptor",
     "student_schema_descriptor",
     "student_target_to_compact_document",
     "validate_student_target",
