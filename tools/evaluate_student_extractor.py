@@ -16,10 +16,10 @@ from app.core.config import PROJECT_ROOT
 from app.schemas.student_extraction import student_target_to_compact_document
 from tools.train_student_extractor import DatasetRecord, read_training_records
 
-DEFAULT_DATASET_DIR = Path("data/training/gemma3_270m_shortkey_v6")
-DEFAULT_MODEL_DIR = Path("output/student_extractor_gemma3_270m_shortkey_v6/merged_model")
+DEFAULT_DATASET_DIR = Path("data/training/gemma3_270m_shortkey_v7")
+DEFAULT_MODEL_DIR = Path("output/student_extractor_gemma3_270m_shortkey_v7/merged_model")
 DEFAULT_OUTPUT_DIR = Path(
-    "output/student_extractor_gemma3_270m_shortkey_v6/test_evaluation"
+    "output/student_extractor_gemma3_270m_shortkey_v7/test_evaluation"
 )
 
 

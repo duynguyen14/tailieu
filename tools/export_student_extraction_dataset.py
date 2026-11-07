@@ -30,7 +30,7 @@ from app.schemas.teacher_extraction import (
     CompactDocumentExtraction,
 )
 
-DEFAULT_OUTPUT_DIR = Path("data/training/gemma3_270m_shortkey_v6")
+DEFAULT_OUTPUT_DIR = Path("data/training/gemma3_270m_shortkey_v7")
 
 
 @dataclass(frozen=True)

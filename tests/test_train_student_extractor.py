@@ -32,8 +32,6 @@ def write_split(path: Path, split: str, record_id: str) -> None:
                     {
                         "n": {
                             "no": None,
-                            "dt": None,
-                            "pl": None,
                             "snd": None,
                         },
                         "a": [],

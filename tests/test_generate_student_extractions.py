@@ -16,8 +16,6 @@ def test_normalize_student_target_fills_only_known_missing_keys() -> None:
 
     assert normalized["n"] == {
         "no": "2026-01",
-        "dt": None,
-        "pl": None,
         "snd": None,
     }
     assert normalized["a"] == [

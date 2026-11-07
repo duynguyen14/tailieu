@@ -66,8 +66,12 @@ def test_student_target_is_reduced_short_key_json() -> None:
         for applicant in target["a"]
     )
     assert target["n"]["no"] == "850-2026"
+    assert set(target["n"]) == {"no", "snd"}
+    assert "dt" not in target["n"]
+    assert "pl" not in target["n"]
     assert target["a"][0]["nm"] == "Nicholas John Hogarth"
     assert target["a"][0]["pp"] == "RF0210530"
+    assert "pt" in target["a"][0]
     assert target["a"][0]["ne"] == "MULTIPLE"
 
 
@@ -80,6 +84,8 @@ def test_student_target_round_trip_restores_canonical_backend_fields() -> None:
     )
 
     assert restored.note.note_number == "850-2026"
+    assert restored.note.issue_date is None
+    assert restored.note.issue_place is None
     assert restored.applicants[0].person_id == "person_1"
     assert restored.applicants[0].sequence_number == 1
     assert restored.applicants[0].number_of_entries == "MULTIPLE"
@@ -150,7 +156,10 @@ def test_prompt_contains_locked_compact_contract() -> None:
     assert "compact JSON object" in prompt
     assert "root keys n and a" in prompt
     assert "no=note_number" in prompt
+    assert "dt=issue_date" not in prompt
+    assert "pl=issue_place" not in prompt
     assert "nm=full_name" in prompt
+    assert "pt=passport_type" in prompt
     assert "All listed keys are mandatory" in prompt
 
 
