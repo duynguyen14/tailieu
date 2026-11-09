@@ -42,7 +42,9 @@ Return every field defined by the supplied minimal JSON schema. Use null for eve
 unavailable scalar field; do not omit fields and do not add any other fields.
 Do not infer or invent missing facts.
 Preserve names, organizations and passport numbers exactly.
-Normalize an unambiguous date to YYYY-MM-DD; otherwise keep the source form.
+For passport_issue_date, passport_expiration, entry_date and exit_date, return
+only a valid YYYY-MM-DD value when the complete date is unambiguous; otherwise
+return null. Never preserve another date format in those four fields.
 entry_date is only an explicit intended/proposed arrival or entry date into Vietnam.
 exit_date is only an explicit intended/proposed departure or exit date from Vietnam.
 passport_expiration is only the applicant's passport expiry date.

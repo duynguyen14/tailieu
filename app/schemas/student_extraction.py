@@ -330,7 +330,9 @@ in=entry_date, out=exit_date.
 All listed keys are mandatory. Use null when a value is unavailable.
 Do not add, remove, rename, or reorder applicants.
 Preserve explicit source facts; do not infer missing facts.
-Normalize only unambiguous dates to YYYY-MM-DD.
+For pid, pex, in and out, return only a valid YYYY-MM-DD value when the complete
+date is unambiguous; otherwise return null. Never return another date format in
+those four fields. Normalize other dates only when unambiguous.
 
 DOCUMENT_TEXT:
 """

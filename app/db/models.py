@@ -437,6 +437,79 @@ class TeacherExtractionReview(Base):
     source_attempt: Mapped[TeacherExtractionAttempt] = relationship()
 
 
+class StudentTrainingExample(Base):
+    """Versioned local SFT example derived from an approved teacher review.
+
+    Synthetic examples live outside the review queue so they cannot be mistaken
+    for real documents.  They retain explicit lineage to the approved review and
+    source document used to create them.
+    """
+
+    __tablename__ = "student_training_examples"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_review_id",
+            "augmentation_version",
+            "seed",
+            "variation_index",
+            name="uq_student_training_example_source_variant",
+        ),
+        CheckConstraint(
+            "review_status IN ('APPROVED', 'REJECTED')",
+            name="ck_student_training_example_status",
+        ),
+        CheckConstraint(
+            "variation_index >= 1",
+            name="ck_student_training_example_variation",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    source_review_id: Mapped[str] = mapped_column(
+        ForeignKey("teacher_extraction_reviews.id"), nullable=False, index=True
+    )
+    source_job_id: Mapped[str] = mapped_column(
+        ForeignKey("teacher_extraction_jobs.id"), nullable=False, index=True
+    )
+    source_case_id: Mapped[str] = mapped_column(
+        ForeignKey("document_cases.id"), nullable=False, index=True
+    )
+    source_document_id: Mapped[str] = mapped_column(
+        ForeignKey("annotation_documents.id"), nullable=False, index=True
+    )
+    input_text: Mapped[str] = mapped_column(Unicode(), nullable=False)
+    target_json: Mapped[str] = mapped_column(Unicode(), nullable=False)
+    target_schema_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    review_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="APPROVED", index=True
+    )
+    is_synthetic: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, index=True
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, index=True
+    )
+    augmentation_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    seed: Mapped[int] = mapped_column(Integer, nullable=False)
+    variation_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    changes_json: Mapped[str] = mapped_column(Unicode(), nullable=False)
+    record_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True, index=True
+    )
+    generated_by: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    source_review: Mapped[TeacherExtractionReview] = relationship()
+    source_job: Mapped[TeacherExtractionJob] = relationship()
+    source_case: Mapped[DocumentCase] = relationship()
+    source_document: Mapped[AnnotationDocument] = relationship()
+
+
 class OcrRun(Base):
     __tablename__ = "ocr_runs"
     __table_args__ = (

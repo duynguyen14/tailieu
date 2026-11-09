@@ -615,7 +615,13 @@ class OcrReviewService:
             latest_reviewed_at=row.latest_reviewed_at,
         )
 
-    def review(self, *, run_id: str, payload: OcrReviewRequest) -> OcrReviewDetail:
+    def review(
+        self,
+        *,
+        run_id: str,
+        payload: OcrReviewRequest,
+        load_detail: bool = True,
+    ) -> OcrReviewDetail | None:
         reviewer = payload.reviewed_by.strip()
         if not reviewer:
             raise OcrReviewValidationError("Reviewer name cannot be empty.")
@@ -788,6 +794,12 @@ class OcrReviewService:
                     "SQL Server returned review data different from the submitted "
                     "payload. The transaction was rolled back to protect Unicode text."
                 )
+            # Batch maintenance tools may operate against a shared database
+            # whose image storage is mounted only on the API server.  The
+            # review rows can still be validated and verified entirely from
+            # SQL Server; only the response image needs storage access.
+            if not load_detail:
+                return None
             return self._detail(session, run)
 
     def _detail(self, session, run: OcrRun) -> OcrReviewDetail:

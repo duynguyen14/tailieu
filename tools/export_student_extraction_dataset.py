@@ -11,12 +11,16 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
-from sqlalchemy import select, true
+from sqlalchemy import inspect, select, true
 from sqlalchemy.orm import joinedload
 
 from app.core.config import PROJECT_ROOT, get_settings
 from app.db.database import Database
-from app.db.models import TeacherExtractionJob, TeacherExtractionReview
+from app.db.models import (
+    StudentTrainingExample,
+    TeacherExtractionJob,
+    TeacherExtractionReview,
+)
 from app.schemas.student_extraction import (
     STUDENT_MODEL_ID,
     STUDENT_SCHEMA_VERSION,
@@ -47,19 +51,27 @@ class ExportExample:
     target: dict[str, Any]
     split: str
     record_hash: str
+    is_synthetic: bool = False
+    source_review_id: str | None = None
+    augmentation_version: str | None = None
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Export active human-approved teacher reviews as Gemma 3 270M "
-            "text-to-compact-JSON SFT data."
+            "Export active approved real reviews and approved local synthetic "
+            "examples as Gemma 3 270M text-to-compact-JSON SFT data."
         )
     )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--fail-on-invalid", action="store_true")
+    parser.add_argument(
+        "--exclude-synthetic",
+        action="store_true",
+        help="Export only real human-reviewed examples.",
+    )
     return parser.parse_args()
 
 
@@ -149,6 +161,50 @@ def build_example(review: TeacherExtractionReview) -> ExportExample:
     )
 
 
+def build_synthetic_example(row: StudentTrainingExample) -> ExportExample:
+    try:
+        raw_target = json.loads(row.target_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Synthetic example {row.id} contains invalid JSON: {exc}") from exc
+    extraction = CompactDocumentExtraction.model_validate(
+        normalize_teacher_payload_for_student(raw_target)
+    )
+    if extraction.case_id != row.source_case_id:
+        raise ValueError(f"Synthetic example {row.id} has a mismatched case_id.")
+    if extraction.document_id != row.source_document_id:
+        raise ValueError(f"Synthetic example {row.id} has a mismatched document_id.")
+    if split_name(row.source_document_id) != "train":
+        raise ValueError(
+            f"Synthetic example {row.id} was derived from a non-train document."
+        )
+    target = compact_document_to_student_target(extraction)
+    student_target_to_compact_document(
+        target,
+        case_id=row.source_case_id,
+        document_id=row.source_document_id,
+    )
+    input_text = row.input_text.strip()
+    if not input_text:
+        raise ValueError(f"Synthetic example {row.id} has empty input text.")
+    return ExportExample(
+        review_id=row.id,
+        job_id=row.source_job_id,
+        case_id=row.source_case_id,
+        document_id=row.source_document_id,
+        original_filename=row.source_document.original_filename,
+        input_hash=hashlib.sha256(input_text.encode("utf-8")).hexdigest(),
+        reviewed_by=row.generated_by,
+        reviewed_at=row.created_at.isoformat(),
+        input_text=input_text,
+        target=target,
+        split="train",
+        record_hash=record_hash(input_text, target),
+        is_synthetic=True,
+        source_review_id=row.source_review_id,
+        augmentation_version=row.augmentation_version,
+    )
+
+
 def training_record(example: ExportExample) -> dict[str, Any]:
     return {
         "id": example.review_id,
@@ -183,6 +239,9 @@ def manifest_record(example: ExportExample) -> dict[str, Any]:
         "applicant_count": len(example.target["a"]),
         "input_characters": len(example.input_text),
         "target_characters": len(canonical_json(example.target)),
+        "is_synthetic": example.is_synthetic,
+        "source_review_id": example.source_review_id,
+        "augmentation_version": example.augmentation_version,
     }
 
 
@@ -242,6 +301,8 @@ def export_dataset(
         },
         "document_count": len({example.document_id for example in examples}),
         "case_count": len({example.case_id for example in examples}),
+        "synthetic_count": sum(example.is_synthetic for example in examples),
+        "real_count": sum(not example.is_synthetic for example in examples),
         "applicant_count_distribution": {
             str(count): total for count, total in sorted(applicant_distribution.items())
         },
@@ -327,6 +388,45 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                     continue
                 seen_record_hashes.add(example.record_hash)
                 examples.append(example)
+
+            has_synthetic_table = inspect(database.engine).has_table(
+                StudentTrainingExample.__tablename__
+            )
+            if not args.exclude_synthetic and has_synthetic_table:
+                synthetic_statement = (
+                    select(StudentTrainingExample)
+                    .options(joinedload(StudentTrainingExample.source_document))
+                    .where(
+                        StudentTrainingExample.is_active == true(),
+                        StudentTrainingExample.is_synthetic == true(),
+                        StudentTrainingExample.review_status == "APPROVED",
+                        StudentTrainingExample.target_schema_version
+                        == TEACHER_SCHEMA_VERSION,
+                    )
+                    .order_by(
+                        StudentTrainingExample.source_document_id,
+                        StudentTrainingExample.source_review_id,
+                        StudentTrainingExample.variation_index,
+                    )
+                )
+                synthetic_rows = list(session.scalars(synthetic_statement).unique())
+                for row in synthetic_rows:
+                    try:
+                        example = build_synthetic_example(row)
+                    except (ValueError, ValidationError, TypeError) as exc:
+                        invalid_items.append(
+                            {"review_id": row.id, "error": str(exc)}
+                        )
+                        if args.fail_on_invalid:
+                            raise RuntimeError(
+                                f"Invalid approved synthetic example {row.id}: {exc}"
+                            ) from exc
+                        continue
+                    if example.record_hash in seen_record_hashes:
+                        duplicate_hashes += 1
+                        continue
+                    seen_record_hashes.add(example.record_hash)
+                    examples.append(example)
     finally:
         database.close()
 
@@ -339,6 +439,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "counts_by_split": {
             split: counts.get(split, 0) for split in ("train", "val", "test")
         },
+        "real": sum(not example.is_synthetic for example in examples),
+        "synthetic": sum(example.is_synthetic for example in examples),
     }
     if args.dry_run:
         print("Student extraction export: DRY RUN")

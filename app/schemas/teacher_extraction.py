@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime
+import re
+from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.ocr_review import OcrReviewDetail
 
@@ -124,6 +125,25 @@ class CompactApplicant(BaseModel):
     purpose_of_entry: str | None = None
     relationship: str | None = None
     related_to_person_id: str | None = None
+
+    @field_validator(
+        "date_of_birth",
+        "passport_issue_date",
+        "passport_expiration",
+        "entry_date",
+        "exit_date",
+    )
+    @classmethod
+    def validate_business_date_iso(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            raise ValueError("Date must use YYYY-MM-DD or null.")
+        try:
+            date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError("Date must be a valid calendar date.") from exc
+        return value
 
 
 class CompactDocumentExtraction(BaseModel):
