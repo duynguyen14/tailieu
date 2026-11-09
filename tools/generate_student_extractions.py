@@ -30,11 +30,12 @@ from app.schemas.student_extraction import (
     student_target_to_compact_document,
 )
 from app.schemas.teacher_extraction import TEACHER_SCHEMA_VERSION
-from tools.evaluate_student_extractor import (
+from app.services.student_model_runtime import (
+    apply_student_chat_template,
     generation_stop_token_ids,
-    load_runtime,
-    strip_markdown_fence,
+    parse_student_json_output,
 )
+from tools.evaluate_student_extractor import load_runtime
 from tools.generate_teacher_extractions import (
     ReconstructionCandidate,
     canonical_json,
@@ -78,7 +79,7 @@ class LocalGenerationResult:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run the merged local Gemma student model on eligible reconstructed "
+            "Run a merged local student model on eligible reconstructed "
             "documents and enqueue its full business JSON for human review."
         )
     )
@@ -166,6 +167,18 @@ def model_fingerprint(model_dir: Path) -> str:
     digest.update(f"model.safetensors:{stat.st_size}:{stat.st_mtime_ns}".encode())
     digest.update(STUDENT_SCHEMA_VERSION.encode("utf-8"))
     return digest.hexdigest()
+
+
+def local_model_id(model_dir: Path, fingerprint: str) -> str:
+    config_path = model_dir / "config.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        config = {}
+    family = str(config.get("model_type") or model_dir.name).strip().lower()
+    family = "".join(character if character.isalnum() else "-" for character in family)
+    family = family.strip("-") or "student"
+    return f"local-{family}:{fingerprint[:12]}"
 
 
 def student_input_hash(
@@ -384,7 +397,8 @@ def generate_one(
     max_new_tokens: int,
 ) -> LocalGenerationResult:
     user_text = build_student_user_prompt(candidate.reconstructed_text)
-    prompt = tokenizer.apply_chat_template(
+    prompt = apply_student_chat_template(
+        tokenizer,
         [{"role": "user", "content": user_text}],
         tokenize=False,
         add_generation_prompt=True,
@@ -438,7 +452,7 @@ def generate_one(
     raw_response_json = canonical_json({"raw_output": raw_output})
 
     try:
-        raw_target = json.loads(strip_markdown_fence(raw_output))
+        raw_target = parse_student_json_output(raw_output)
         normalized = normalize_student_target(raw_target)
         full_output = student_target_to_compact_document(
             normalized,
@@ -488,7 +502,7 @@ def run(args: argparse.Namespace) -> StudentGenerationSummary:
         raise RuntimeError("Student extraction must run with DB_NAME=anotation_2.")
     model_dir = resolve_path(args.model_dir)
     fingerprint = model_fingerprint(model_dir)
-    model_id = f"local-gemma3-270m:{fingerprint[:12]}"
+    model_id = local_model_id(model_dir, fingerprint)
     database = Database(settings)
     summary = StudentGenerationSummary()
     try:

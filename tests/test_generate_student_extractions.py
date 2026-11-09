@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from tools.generate_student_extractions import normalize_student_target
+from tools.generate_student_extractions import local_model_id, normalize_student_target
 
 
 def test_normalize_student_target_fills_only_known_missing_keys() -> None:
@@ -49,3 +49,15 @@ def test_normalize_student_target_fills_only_known_missing_keys() -> None:
 def test_normalize_student_target_rejects_invalid_shapes(payload, error: str) -> None:
     with pytest.raises(ValueError, match=error.replace("[", r"\[").replace("]", r"\]")):
         normalize_student_target(payload)
+
+
+def test_local_model_id_uses_model_family_instead_of_hardcoded_gemma(
+    tmp_path,
+) -> None:
+    (tmp_path / "config.json").write_text(
+        '{"model_type":"qwen3"}', encoding="utf-8"
+    )
+
+    assert local_model_id(tmp_path, "abcdef1234567890") == (
+        "local-qwen3:abcdef123456"
+    )

@@ -6,16 +6,20 @@ import json
 import os
 import subprocess
 import sys
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from app.core.config import PROJECT_ROOT
 from app.schemas.student_extraction import (
     STUDENT_SCHEMA_VERSION,
     student_target_to_compact_document,
+)
+from app.services.student_model_runtime import (
+    apply_student_chat_template,
+    student_training_assistant_content,
 )
 from tools.student_extractor_train_config import StudentExtractorTrainSettings
 
@@ -44,9 +48,9 @@ class DatasetSummary:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Fine-tune google/gemma-3-270m-it as the compact text-to-JSON "
-            "student extractor. The parent command launches torchrun when "
-            "multiple GPUs are configured."
+            "Fine-tune a causal language model as the compact text-to-JSON "
+            "student extractor. Gemma and Qwen3 are supported. The parent "
+            "command launches torchrun when multiple GPUs are configured."
         )
     )
     parser.add_argument("--dataset-dir", type=Path)
@@ -248,7 +252,9 @@ def settings_environment(settings: StudentExtractorTrainSettings) -> dict[str, s
         "STUDENT_TRAIN_EPOCHS": settings.student_train_epochs,
         "STUDENT_TRAIN_BATCH_SIZE": settings.student_train_batch_size,
         "STUDENT_TRAIN_EVAL_BATCH_SIZE": settings.student_train_eval_batch_size,
-        "STUDENT_TRAIN_GRADIENT_ACCUMULATION_STEPS": settings.student_train_gradient_accumulation_steps,
+        "STUDENT_TRAIN_GRADIENT_ACCUMULATION_STEPS": (
+            settings.student_train_gradient_accumulation_steps
+        ),
         "STUDENT_TRAIN_LEARNING_RATE": settings.student_train_learning_rate,
         "STUDENT_TRAIN_WEIGHT_DECAY": settings.student_train_weight_decay,
         "STUDENT_TRAIN_WARMUP_RATIO": settings.student_train_warmup_ratio,
@@ -312,7 +318,7 @@ def build_launch_command(
 
 def _common_prefix_length(left: list[int], right: list[int]) -> int:
     length = 0
-    for left_value, right_value in zip(left, right):
+    for left_value, right_value in zip(left, right, strict=False):
         if left_value != right_value:
             break
         length += 1
@@ -355,15 +361,24 @@ def tokenize_records(
     truncated = 0
     for record in records:
         user_message = {"role": "user", "content": record.user_text}
-        assistant_message = {"role": "assistant", "content": record.assistant_text}
+        assistant_message = {
+            "role": "assistant",
+            "content": student_training_assistant_content(
+                tokenizer, record.assistant_text
+            ),
+        }
         prompt_ids = _normalize_token_ids(
-            tokenizer.apply_chat_template(
-                [user_message], tokenize=True, add_generation_prompt=True
+            apply_student_chat_template(
+                tokenizer,
+                [user_message],
+                tokenize=True,
+                add_generation_prompt=True,
             ),
             context=f"Record {record.record_id} prompt",
         )
         full_ids = _normalize_token_ids(
-            tokenizer.apply_chat_template(
+            apply_student_chat_template(
+                tokenizer,
                 [user_message, assistant_message],
                 tokenize=True,
                 add_generation_prompt=False,
@@ -435,13 +450,15 @@ def run_worker(settings: StudentExtractorTrainSettings) -> None:
         from peft import LoraConfig, get_peft_model
         from torch.utils.data import Dataset
         from transformers import (
-            __version__ as transformers_version,
             AutoModelForCausalLM,
             AutoTokenizer,
             EarlyStoppingCallback,
             Trainer,
             TrainingArguments,
             set_seed,
+        )
+        from transformers import (
+            __version__ as transformers_version,
         )
     except ImportError as error:
         raise RuntimeError(
@@ -662,7 +679,8 @@ def run_worker(settings: StudentExtractorTrainSettings) -> None:
     trainer.save_state()
     if trainer.is_world_process_zero():
         summary = {
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            # Keep Python 3.10 compatibility on the Linux training host.
+            "created_at": datetime.now(timezone.utc).isoformat(),  # noqa: UP017
             "model_source": model_source,
             "schema_version": STUDENT_SCHEMA_VERSION,
             "dataset_counts": dataset_summary.counts,
@@ -691,9 +709,11 @@ def merge_adapter(settings: StudentExtractorTrainSettings) -> None:
         import torch
         from peft import PeftModel
         from transformers import (
-            __version__ as transformers_version,
             AutoModelForCausalLM,
             AutoTokenizer,
+        )
+        from transformers import (
+            __version__ as transformers_version,
         )
     except ImportError as error:
         raise RuntimeError(
@@ -732,7 +752,8 @@ def merge_adapter(settings: StudentExtractorTrainSettings) -> None:
     (merged_path / "merge_metadata.json").write_text(
         json.dumps(
             {
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                # Keep Python 3.10 compatibility on the Linux training host.
+                "created_at": datetime.now(timezone.utc).isoformat(),  # noqa: UP017
                 "base_model": model_source,
                 "adapter": str(adapter_path),
                 "schema_version": STUDENT_SCHEMA_VERSION,

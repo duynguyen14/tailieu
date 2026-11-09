@@ -102,5 +102,39 @@ def test_completion_tokens_are_the_only_supervised_tokens() -> None:
     assert tokenized[0]["labels"] == [-100, -100, -100, 20, 21]
 
 
+def test_qwen_empty_think_prefix_is_not_supervised() -> None:
+    class FakeQwenTokenizer:
+        chat_template = "enable_thinking <think>"
+
+        def apply_chat_template(self, messages, **kwargs):
+            assert kwargs["enable_thinking"] is False
+            if len(messages) == 1:
+                # User + assistant header + empty non-thinking block.
+                return [10, 11, 12, 13]
+            assert messages[1]["content"].startswith("<think>\n\n</think>\n\n")
+            return [10, 11, 12, 13, 20, 21]
+
+    records = [
+        DatasetRecord(
+            record_id="review-qwen",
+            case_id="case-qwen",
+            document_id="document-qwen",
+            user_text="source",
+            assistant_text="target",
+        )
+    ]
+
+    tokenized, truncated = tokenize_records(
+        records,
+        tokenizer=FakeQwenTokenizer(),
+        maximum_length=32,
+        fail_on_truncation=True,
+    )
+
+    assert truncated == 0
+    assert tokenized[0]["input_ids"] == [10, 11, 12, 13, 20, 21]
+    assert tokenized[0]["labels"] == [-100, -100, -100, -100, 20, 21]
+
+
 def test_gpu_id_parser_rejects_duplicates() -> None:
     assert parse_gpu_device_ids("2, 3,4") == (2, 3, 4)

@@ -27,6 +27,11 @@ from app.schemas.student_extraction import (
 )
 from app.services.exceptions import ProductionExtractionError
 from app.services.pdf_renderer import PdfRenderer
+from app.services.student_model_runtime import (
+    apply_student_chat_template,
+    generation_stop_token_ids,
+    parse_student_json_output,
+)
 from app.services.text_reconstruction import (
     PageReconstructionInput,
     ReconstructionToken,
@@ -83,7 +88,7 @@ class _StudentRuntime:
 
         model_dir = settings.production_student_model_path
         if not (model_dir / "config.json").is_file():
-            raise RuntimeError(f"Merged Gemma model was not found: {model_dir}")
+            raise RuntimeError(f"Merged student model was not found: {model_dir}")
         self.model_dir = model_dir
         self.tokenizer = AutoTokenizer.from_pretrained(model_dir, local_files_only=True)
         load_kwargs: dict[str, Any] = {"local_files_only": True}
@@ -104,7 +109,7 @@ class _StudentRuntime:
             self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
         if self.device.startswith("cuda"):
             torch.backends.cuda.matmul.allow_tf32 = True
-        self.stop_token_ids = self._generation_stop_token_ids()
+        self.stop_token_ids = generation_stop_token_ids(self.tokenizer, self.model)
         self.max_input_tokens = settings.production_student_max_input_tokens
         self.max_new_tokens = settings.production_student_max_new_tokens
 
@@ -120,49 +125,20 @@ class _StudentRuntime:
             )
         return "cpu"
 
-    def _generation_stop_token_ids(self) -> list[int]:
-        candidates: list[Any] = [
-            getattr(self.model.generation_config, "eos_token_id", None),
-            getattr(self.model.config, "eos_token_id", None),
-            getattr(self.tokenizer, "eos_token_id", None),
-            self.tokenizer.convert_tokens_to_ids("<end_of_turn>"),
-        ]
-        values: list[int] = []
-        for candidate in candidates:
-            items = candidate if isinstance(candidate, (list, tuple)) else [candidate]
-            for item in items:
-                if isinstance(item, int) and item >= 0 and item not in values:
-                    values.append(item)
-        if not values:
-            raise RuntimeError("Gemma exposes no generation stop token.")
-        return values
-
-    @staticmethod
-    def _strip_markdown_fence(text: str) -> str:
-        cleaned = text.strip()
-        if not cleaned.startswith("```"):
-            return cleaned
-        lines = cleaned.splitlines()
-        if lines and lines[0].strip().startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        return "\n".join(lines).strip()
-
     @staticmethod
     def _normalize_target(value: Any) -> dict[str, Any]:
         if not isinstance(value, dict):
-            raise ValueError("Gemma response root must be a JSON object.")
+            raise ValueError("Student response root must be a JSON object.")
         note = value.get("n")
         applicants = value.get("a")
         if not isinstance(note, dict):
-            raise ValueError("Gemma response n must be a JSON object.")
+            raise ValueError("Student response n must be a JSON object.")
         if not isinstance(applicants, list):
-            raise ValueError("Gemma response a must be a JSON array.")
+            raise ValueError("Student response a must be a JSON array.")
         normalized_applicants: list[dict[str, Any]] = []
         for index, row in enumerate(applicants):
             if not isinstance(row, dict):
-                raise ValueError(f"Gemma response a[{index}] must be a JSON object.")
+                raise ValueError(f"Student response a[{index}] must be a JSON object.")
             normalized_applicants.append(
                 {alias: row.get(alias) for alias in STUDENT_APPLICANT_KEYS.values()}
             )
@@ -184,7 +160,8 @@ class _StudentRuntime:
         max_new_tokens: int | None = None,
         validate: bool = True,
     ) -> tuple[dict[str, Any], int, float]:
-        prompt = self.tokenizer.apply_chat_template(
+        prompt = apply_student_chat_template(
+            self.tokenizer,
             [{"role": "user", "content": build_student_user_prompt(text)}],
             tokenize=False,
             add_generation_prompt=True,
@@ -218,11 +195,11 @@ class _StudentRuntime:
         if not validate:
             return {}, generated_tokens, latency_ms
         try:
-            parsed = json.loads(self._strip_markdown_fence(raw))
+            parsed = parse_student_json_output(raw)
             return self._normalize_target(parsed), generated_tokens, latency_ms
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
             raise ProductionExtractionError(
-                f"Gemma returned invalid compact JSON: {exc}"
+                f"Student model returned invalid compact JSON: {exc}"
             ) from exc
 
 

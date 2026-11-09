@@ -14,6 +14,11 @@ from typing import Any
 
 from app.core.config import PROJECT_ROOT
 from app.schemas.student_extraction import student_target_to_compact_document
+from app.services.student_model_runtime import (
+    apply_student_chat_template,
+    generation_stop_token_ids,
+    parse_student_json_output,
+)
 from tools.train_student_extractor import DatasetRecord, read_training_records
 
 DEFAULT_DATASET_DIR = Path("data/training/gemma3_270m_shortkey_v8")
@@ -49,7 +54,7 @@ class PredictionResult:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run the merged Gemma student extractor on a held-out JSONL split "
+            "Run a merged student extractor on a held-out JSONL split "
             "and report strict JSON/schema/field accuracy plus latency."
         )
     )
@@ -85,18 +90,6 @@ def percentile(values: list[float], percentage: float) -> float:
     if lower == upper:
         return ordered[lower]
     return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
-
-
-def strip_markdown_fence(text: str) -> str:
-    cleaned = text.strip()
-    if not cleaned.startswith("```"):
-        return cleaned
-    lines = cleaned.splitlines()
-    if lines and lines[0].strip().startswith("```"):
-        lines = lines[1:]
-    if lines and lines[-1].strip() == "```":
-        lines = lines[:-1]
-    return "\n".join(lines).strip()
 
 
 def flatten_fields(value: Any, prefix: str = "$") -> dict[str, Any]:
@@ -158,31 +151,6 @@ def load_runtime(args: argparse.Namespace) -> tuple[Any, Any, Any, str]:
     return torch, tokenizer, model, runtime_device
 
 
-def generation_stop_token_ids(tokenizer: Any, model: Any) -> list[int]:
-    """Keep both Gemma EOS and end-of-turn tokens.
-
-    Gemma 3 instruction checkpoints normally stop on either token 1 or token
-    106.  ``tokenizer.eos_token_id`` only exposes token 1 in some Transformers
-    versions, so using it alone makes generation run until max_new_tokens.
-    """
-
-    candidates: list[Any] = [
-        getattr(model.generation_config, "eos_token_id", None),
-        getattr(model.config, "eos_token_id", None),
-        getattr(tokenizer, "eos_token_id", None),
-        tokenizer.convert_tokens_to_ids("<end_of_turn>"),
-    ]
-    values: list[int] = []
-    for candidate in candidates:
-        items = candidate if isinstance(candidate, (list, tuple)) else [candidate]
-        for item in items:
-            if isinstance(item, int) and item >= 0 and item not in values:
-                values.append(item)
-    if not values:
-        raise RuntimeError("The tokenizer/model exposes no generation stop token")
-    return values
-
-
 def evaluate_record(
     record: DatasetRecord,
     *,
@@ -194,8 +162,11 @@ def evaluate_record(
 ) -> PredictionResult:
     expected = json.loads(record.assistant_text)
     message = {"role": "user", "content": record.user_text}
-    prompt = tokenizer.apply_chat_template(
-        [message], tokenize=False, add_generation_prompt=True
+    prompt = apply_student_chat_template(
+        tokenizer,
+        [message],
+        tokenize=False,
+        add_generation_prompt=True,
     )
     encoded = tokenizer(
         prompt,
@@ -229,7 +200,7 @@ def evaluate_record(
     schema_valid = False
     error: str | None = None
     try:
-        prediction = json.loads(strip_markdown_fence(raw_output))
+        prediction = parse_student_json_output(raw_output)
         json_valid = True
         student_target_to_compact_document(
             prediction,
