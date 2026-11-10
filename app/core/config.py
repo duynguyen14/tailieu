@@ -234,7 +234,7 @@ class Settings(BaseSettings):
     )
     production_student_precision: str = "bf16"
     production_student_max_input_tokens: int = Field(default=4096, ge=256, le=32768)
-    production_student_max_new_tokens: int = Field(default=1024, ge=32, le=4096)
+    production_student_max_new_tokens: int = Field(default=2048, ge=32, le=8192)
     production_student_torch_compile: bool = True
     production_student_torch_compile_mode: str = "default"
     production_student_cache_implementation: str = "static"
@@ -246,6 +246,8 @@ class Settings(BaseSettings):
     production_student_api_timeout_seconds: float = Field(
         default=120.0, ge=1.0, le=3600.0
     )
+    production_api_key: str | None = "9148fca3-187c-46d1-95d5-5c8c4b8ea1ad"
+    production_api_key_header: str = "X-API-Key"
     production_ocr_page_types: str = (
         "DIPLOMATIC_NOTE,APPLICANT_TABLE,APPLICANT_LIST"
     )
@@ -298,12 +300,12 @@ class Settings(BaseSettings):
             )
         return normalized
 
-    @field_validator("production_student_api_base_url", mode="before")
+    @field_validator("production_student_api_base_url", "production_api_key", mode="before")
     @classmethod
     def empty_student_api_url_is_none(cls, value):
         if isinstance(value, str) and not value.strip():
             return None
-        return value
+        return value.strip() if isinstance(value, str) else value
 
     @field_validator(
         "page_classifier_model_path",

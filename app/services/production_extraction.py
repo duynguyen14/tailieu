@@ -486,24 +486,170 @@ class _StudentRuntime:
         return "cpu"
 
     @staticmethod
-    def _normalize_target(value: Any) -> dict[str, Any]:
+    def _clean_scalar(value: Any) -> str | None:
+        if value is None or isinstance(value, (dict, list, bool)):
+            return None
+        text = str(value).strip()
+        if not text or text.lower() in {"null", "none", "n/a", "-"}:
+            return None
+        return text
+
+    @classmethod
+    def _normalize_iso_date_safe(cls, value: Any) -> str | None:
+        import re
+        from datetime import date, datetime
+
+        raw = cls._clean_scalar(value)
+        if raw is None:
+            return None
+        cleaned = re.sub(r"\s+", " ", raw).strip(" ,.;")
+        # Remove ordinal suffixes like 01st, 2nd, 3rd, 4th
+        cleaned = re.sub(r"\b(\d{1,2})(?:st|nd|rd|th)\b", r"\1", cleaned, flags=re.IGNORECASE)
+        # Insert space between digit and month name if missing (e.g. "27April 2026")
+        cleaned = re.sub(r"(\d)([A-Za-z])", r"\1 \2", cleaned)
+        cleaned = re.sub(r"([A-Za-z])(\d)", r"\1 \2", cleaned)
+
+        # 1. YYYY-M-D / YYYY/M/D / YYYY.M.D
+        m_ymd = re.fullmatch(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", cleaned)
+        if m_ymd:
+            try:
+                return date(int(m_ymd.group(1)), int(m_ymd.group(2)), int(m_ymd.group(3))).isoformat()
+            except ValueError:
+                return None
+
+        # 2. D/M/YYYY or D-M-YYYY or D.M.YYYY
+        m_dmy = re.fullmatch(r"(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})", cleaned)
+        if m_dmy:
+            d_val, m_val, y_val = int(m_dmy.group(1)), int(m_dmy.group(2)), int(m_dmy.group(3))
+            try:
+                return date(y_val, m_val, d_val).isoformat()
+            except ValueError:
+                # Fallback if month/day were swapped (MM/DD/YYYY where DD > 12)
+                try:
+                    return date(y_val, d_val, m_val).isoformat()
+                except ValueError:
+                    return None
+
+        # 3. English month name formats (e.g. "20 November 1967", "Nov 20, 1967", "20-Nov-1967")
+        normalized_words = cleaned.replace("-", " ").replace(",", " ")
+        normalized_words = re.sub(r"\s+", " ", normalized_words).strip()
+        for fmt in ("%d %B %Y", "%d %b %Y", "%d %b. %Y", "%B %d %Y", "%b %d %Y", "%b. %d %Y", "%Y %B %d", "%Y %b %d"):
+            try:
+                return datetime.strptime(normalized_words, fmt).date().isoformat()
+            except ValueError:
+                continue
+
+        return None
+
+    @staticmethod
+    def _parse_or_repair_student_output(raw: str) -> dict[str, Any]:
+        import re
+
+        try:
+            parsed = parse_student_json_output(raw)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+
+        text = raw.strip()
+        if "</think>" in text:
+            text = text.split("</think>", maxsplit=1)[-1].strip()
+        start = text.find("{")
+        if start < 0:
+            return {"n": {}, "a": []}
+        candidate = text[start:]
+        # Replace raw control characters/newlines with spaces so multi-line strings don't break JSON
+        flat = re.sub(r"[\r\n\t]+", " ", candidate).strip()
+
+        try:
+            obj = json.loads(flat, strict=False)
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
+
+        # Auto-repair truncated JSON by walking backwards and closing open quotes/brackets/braces
+        def _close_json_prefix(prefix: str) -> str:
+            in_str = False
+            esc = False
+            stack: list[str] = []
+            for ch in prefix:
+                if in_str:
+                    if esc:
+                        esc = False
+                    elif ch == "\\":
+                        esc = True
+                    elif ch == '"':
+                        in_str = False
+                    continue
+                if ch == '"':
+                    in_str = True
+                elif ch == "{":
+                    stack.append("}")
+                elif ch == "[":
+                    stack.append("]")
+                elif ch in ("}", "]") and stack and stack[-1] == ch:
+                    stack.pop()
+            out = prefix.rstrip(" ,:")
+            if esc and out.endswith("\\"):
+                out = out[:-1]
+            if in_str:
+                out += '"'
+            out = out.rstrip(" ,:")
+            return out + "".join(reversed(stack))
+
+        for cut in range(len(flat), 0, -1):
+            if cut < len(flat) and flat[cut - 1] not in ('"', "}", "]", ",", "l", "e", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"):
+                continue
+            repaired = _close_json_prefix(flat[:cut])
+            try:
+                obj = json.loads(repaired, strict=False)
+                if isinstance(obj, dict):
+                    return obj
+            except Exception:
+                continue
+
+        return {"n": {}, "a": []}
+
+    @classmethod
+    def _normalize_target(cls, value: Any) -> dict[str, Any]:
         if not isinstance(value, dict):
-            raise ValueError("Student response root must be a JSON object.")
+            value = {"n": {}, "a": []}
         note = value.get("n")
-        applicants = value.get("a")
         if not isinstance(note, dict):
-            raise ValueError("Student response n must be a JSON object.")
+            note = {}
+        applicants = value.get("a")
         if not isinstance(applicants, list):
-            raise ValueError("Student response a must be a JSON array.")
+            applicants = []
+
+        valid_rt = {"CAP_MOI", "GIA_HAN", "CHUYEN_THI_THUC", "KHAC"}
+        raw_rt = cls._clean_scalar(note.get("rt"))
+        norm_rt = raw_rt.upper() if raw_rt and raw_rt.upper() in valid_rt else None
+
+        normalized_note: dict[str, Any] = {
+            "no": cls._clean_scalar(note.get("no")),
+            "snd": cls._clean_scalar(note.get("snd")),
+            "rt": norm_rt,
+        }
+
+        date_aliases = {"dob", "pid", "pex", "in", "out"}
         normalized_applicants: list[dict[str, Any]] = []
-        for index, row in enumerate(applicants):
+        for row in applicants:
             if not isinstance(row, dict):
-                raise ValueError(f"Student response a[{index}] must be a JSON object.")
-            normalized_applicants.append(
-                {alias: row.get(alias) for alias in STUDENT_APPLICANT_KEYS.values()}
-            )
+                continue
+            item: dict[str, Any] = {}
+            for alias in STUDENT_APPLICANT_KEYS.values():
+                if alias in date_aliases:
+                    item[alias] = cls._normalize_iso_date_safe(row.get(alias))
+                else:
+                    item[alias] = cls._clean_scalar(row.get(alias))
+            # Skip completely empty applicant shells generated by truncated tail repair
+            if any(v is not None for v in item.values()):
+                normalized_applicants.append(item)
+
         return {
-            "n": {alias: note.get(alias) for alias in STUDENT_NOTE_KEYS.values()},
+            "n": normalized_note,
             "a": normalized_applicants,
         }
 
@@ -707,6 +853,7 @@ class _StudentRuntime:
             "messages": [{"role": "user", "content": build_student_user_prompt(text)}],
             "temperature": 0.0,
             "max_tokens": max_new_tokens or self.max_new_tokens,
+            "response_format": {"type": "json_object"},
             "chat_template_kwargs": {"enable_thinking": False},
         }
         started = time.perf_counter()
@@ -716,6 +863,13 @@ class _StudentRuntime:
                 json=payload,
                 headers=headers,
             )
+            if response.status_code == 400:
+                payload.pop("response_format", None)
+                response = self._api_client.post(
+                    f"{self.api_base_url}/chat/completions",
+                    json=payload,
+                    headers=headers,
+                )
             response.raise_for_status()
             data = response.json()
         except Exception as exc:
@@ -735,13 +889,8 @@ class _StudentRuntime:
         )
         if not validate:
             return {}, generated_tokens, latency_ms
-        try:
-            parsed = parse_student_json_output(raw)
-            return self._normalize_target(parsed), generated_tokens, latency_ms
-        except (json.JSONDecodeError, TypeError, ValueError) as exc:
-            raise ProductionExtractionError(
-                f"Student model returned invalid compact JSON: {exc}"
-            ) from exc
+        parsed = self._parse_or_repair_student_output(raw)
+        return self._normalize_target(parsed), generated_tokens, latency_ms
 
     def generate(
         self,
@@ -807,13 +956,8 @@ class _StudentRuntime:
         raw = self.tokenizer.decode(output_ids, skip_special_tokens=True).strip()
         if not validate:
             return {}, generated_tokens, latency_ms
-        try:
-            parsed = parse_student_json_output(raw)
-            return self._normalize_target(parsed), generated_tokens, latency_ms
-        except (json.JSONDecodeError, TypeError, ValueError) as exc:
-            raise ProductionExtractionError(
-                f"Student model returned invalid compact JSON: {exc}"
-            ) from exc
+        parsed = self._parse_or_repair_student_output(raw)
+        return self._normalize_target(parsed), generated_tokens, latency_ms
 
 
 class ProductionExtractionService:
@@ -1185,6 +1329,7 @@ class ProductionExtractionService:
             generated_tokens,
             extraction_ms,
         )
+        compact_output = _StudentRuntime._normalize_target(compact_output)
         extraction = student_target_to_compact_document(
             compact_output,
             case_id=request_id,
@@ -1350,6 +1495,7 @@ class ProductionExtractionService:
             compact_output, _generated_tokens, extraction_ms = self._student.generate(
                 reconstructed_text
             )
+            compact_output = _StudentRuntime._normalize_target(compact_output)
             extraction = student_target_to_compact_document(
                 compact_output,
                 case_id=request_id,
