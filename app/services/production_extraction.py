@@ -175,18 +175,12 @@ class _StudentRuntime:
         self._graph_next_token: Any | None = None
         self._max_cache_len = self.max_input_tokens + self.max_new_tokens + 64
 
-        # Immutable prefix KV cache for the static instruction header preceding
+        #Immutable prefix KV cache for the static instruction header preceding
         # DOCUMENT_TEXT so every request skips prefilling those ~200 tokens.
         self._prefix_ids: list[int] = []
         self._prefix_len: int = 0
         self._prefix_kv_snapshot: list[tuple[Any, Any]] | None = None
         self._dynamic_prefix_kv: list[tuple[Any, Any]] | None = None
-
-        if self.device.startswith("cuda"):
-            self._init_static_and_prefix_cache(
-                enable_cuda_graph=settings.production_student_use_cuda_graph,
-                enable_prefix_cache=settings.production_student_enable_prefix_cache,
-            )
 
         self.compiled = False
         if (
@@ -659,7 +653,12 @@ class _StudentRuntime:
             }
             if attention_mask is not None:
                 prefill_kwargs["attention_mask"] = attention_mask
-            prefill_out = self._eager_forward(**prefill_kwargs, **step_extra)
+            try:
+                prefill_out = self._eager_forward(**prefill_kwargs, **step_extra)
+            except TypeError:
+                self._supports_logits_to_keep = False
+                step_extra = {}
+                prefill_out = self._eager_forward(**prefill_kwargs)
 
         past_key_values = prefill_out.past_key_values
         next_token = prefill_out.logits[:, -1:, :].argmax(dim=-1)
