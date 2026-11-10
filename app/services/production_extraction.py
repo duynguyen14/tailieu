@@ -147,30 +147,56 @@ class _StudentRuntime:
             if self.device.startswith("cuda")
             else "dynamic"
         )
+        self._eager_forward = self.model.forward
         self.compiled = False
         if (
             self.device.startswith("cuda")
             and settings.production_student_torch_compile
             and hasattr(torch, "compile")
         ):
-            try:
-                self.model.forward = torch.compile(
-                    self.model.forward,
-                    mode=settings.production_student_torch_compile_mode,
-                    fullgraph=False,
-                )
-                self.compiled = True
-                LOGGER.info(
-                    "Enabled torch.compile for student runtime; mode=%s cache=%s",
-                    settings.production_student_torch_compile_mode,
-                    self.cache_implementation,
-                )
-            except Exception as exc:
+            import sysconfig
+
+            include_dir = Path(sysconfig.get_paths().get("include", ""))
+            if not (include_dir / "Python.h").is_file():
                 LOGGER.warning(
-                    "Could not enable torch.compile for student runtime, using eager mode: %s",
-                    exc,
+                    "Skipping torch.compile because Python development headers "
+                    "(Python.h) are not installed in %s. Install python3-dev on "
+                    "Linux to enable Inductor/Triton compilation.",
+                    include_dir,
                 )
-                self.cache_implementation = "dynamic"
+            else:
+                try:
+                    compiled_fn = torch.compile(
+                        self._eager_forward,
+                        mode=settings.production_student_torch_compile_mode,
+                        fullgraph=False,
+                    )
+                    mark_step = getattr(
+                        getattr(torch, "compiler", None),
+                        "cudagraph_mark_step_begin",
+                        None,
+                    )
+                    if callable(mark_step):
+                        def _compiled_forward(*args: Any, **kwargs: Any) -> Any:
+                            mark_step()
+                            return compiled_fn(*args, **kwargs)
+
+                        self.model.forward = _compiled_forward
+                    else:
+                        self.model.forward = compiled_fn
+                    self.compiled = True
+                    LOGGER.info(
+                        "Enabled torch.compile for student runtime; mode=%s cache=%s",
+                        settings.production_student_torch_compile_mode,
+                        self.cache_implementation,
+                    )
+                except Exception as exc:
+                    LOGGER.warning(
+                        "Could not enable torch.compile for student runtime, using eager mode: %s",
+                        exc,
+                    )
+                    self.model.forward = self._eager_forward
+                    self.compiled = False
 
     def _resolve_device(self, settings: Settings) -> str:
         torch = self.torch
@@ -249,13 +275,16 @@ class _StudentRuntime:
         with self.torch.inference_mode():
             try:
                 generated = self.model.generate(**encoded, **gen_kwargs)
-            except (TypeError, ValueError, RuntimeError) as exc:
-                if "cache_implementation" not in gen_kwargs:
-                    raise
+            except Exception as exc:
                 LOGGER.warning(
-                    "Static KV cache generation failed (%s); falling back to dynamic cache.",
+                    "Compiled/static student generation failed (%s); falling back to eager forward.",
                     exc,
                 )
+                if self.compiled:
+                    self.model.forward = self._eager_forward
+                    self.compiled = False
+                    if hasattr(self.torch, "_dynamo"):
+                        self.torch._dynamo.reset()
                 self.cache_implementation = "dynamic"
                 gen_kwargs.pop("cache_implementation", None)
                 generated = self.model.generate(**encoded, **gen_kwargs)
