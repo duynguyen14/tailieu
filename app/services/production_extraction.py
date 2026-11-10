@@ -92,13 +92,28 @@ class _StudentRuntime:
         if self.api_base_url:
             self.device = f"api:{self.api_base_url}"
             self.model_dir = Path(settings.production_student_api_model)
+            self.tokenizer = None
+            try:
+                from transformers import AutoTokenizer
+
+                local_model_dir = settings.production_student_model_path
+                if (local_model_dir / "tokenizer_config.json").is_file():
+                    self.tokenizer = AutoTokenizer.from_pretrained(
+                        local_model_dir, local_files_only=True
+                    )
+            except Exception as exc:
+                LOGGER.warning(
+                    "Could not load local tokenizer for student API prompt formatting: %s",
+                    exc,
+                )
             self._api_client = httpx.Client(
                 timeout=settings.production_student_api_timeout_seconds
             )
             LOGGER.info(
-                "Initialized remote student API runtime; base_url=%s model=%s",
+                "Initialized remote student API runtime; base_url=%s model=%s local_tokenizer=%s",
                 self.api_base_url,
                 settings.production_student_api_model,
+                self.tokenizer is not None,
             )
             return
 
@@ -848,26 +863,47 @@ class _StudentRuntime:
             key = self.settings.production_student_api_key.get_secret_value().strip()
             if key:
                 headers["Authorization"] = f"Bearer {key}"
-        payload: dict[str, Any] = {
+
+        user_prompt = build_student_user_prompt(text)
+        if getattr(self, "tokenizer", None) is not None:
+            prompt = apply_student_chat_template(
+                self.tokenizer,
+                [{"role": "user", "content": user_prompt}],
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        else:
+            prompt = (
+                f"<|im_start|>user\n{user_prompt}<|im_end|>\n"
+                "<|im_start|>assistant\n<think>\n\n</think>\n\n"
+            )
+
+        effective_max_tokens = max_new_tokens or max(self.max_new_tokens, 2048)
+        completions_payload: dict[str, Any] = {
             "model": self.settings.production_student_api_model,
-            "messages": [{"role": "user", "content": build_student_user_prompt(text)}],
+            "prompt": prompt,
             "temperature": 0.0,
-            "max_tokens": max_new_tokens or self.max_new_tokens,
-            "response_format": {"type": "json_object"},
-            "chat_template_kwargs": {"enable_thinking": False},
+            "max_tokens": effective_max_tokens,
+            "stop": ["<|im_end|>", "<|endoftext|>", "<end_of_turn>"],
         }
         started = time.perf_counter()
         try:
             response = self._api_client.post(
-                f"{self.api_base_url}/chat/completions",
-                json=payload,
+                f"{self.api_base_url}/completions",
+                json=completions_payload,
                 headers=headers,
             )
-            if response.status_code == 400:
-                payload.pop("response_format", None)
+            if response.status_code == 404:
+                chat_payload: dict[str, Any] = {
+                    "model": self.settings.production_student_api_model,
+                    "messages": [{"role": "user", "content": user_prompt}],
+                    "temperature": 0.0,
+                    "max_tokens": effective_max_tokens,
+                    "chat_template_kwargs": {"enable_thinking": False},
+                }
                 response = self._api_client.post(
                     f"{self.api_base_url}/chat/completions",
-                    json=payload,
+                    json=chat_payload,
                     headers=headers,
                 )
             response.raise_for_status()
@@ -876,7 +912,11 @@ class _StudentRuntime:
             raise ProductionExtractionError(f"Student API request failed: {exc}") from exc
         latency_ms = (time.perf_counter() - started) * 1000
         try:
-            raw = str(data["choices"][0]["message"]["content"]).strip()
+            choice = data["choices"][0]
+            if "text" in choice:
+                raw = str(choice["text"]).strip()
+            else:
+                raw = str(choice["message"]["content"]).strip()
         except (KeyError, IndexError, TypeError) as exc:
             raise ProductionExtractionError(
                 f"Student API returned an invalid response payload: {exc}"

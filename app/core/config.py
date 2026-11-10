@@ -255,7 +255,7 @@ class Settings(BaseSettings):
     production_ocr_enable_refinement: bool = False
     production_include_reconstructed_text: bool = False
 
-    pdf_dpi: int = Field(default=200, ge=72, le=400)
+    pdf_dpi: int = Field(default=250, ge=72, le=400)
     max_file_size_mb: int = Field(default=30, ge=1, le=500)
     max_pages: int = Field(default=50, ge=1, le=1000)
     max_render_pixels: int = Field(default=25_000_000, ge=1_000_000)
