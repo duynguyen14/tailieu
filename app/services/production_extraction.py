@@ -383,10 +383,13 @@ class _StudentRuntime:
                     self._cuda_graph = graph
                 except Exception as exc:
                     LOGGER.info(
-                        "Manual CUDA Graph capture skipped (%s); using StaticCache + compiled decode.",
+                        "Manual CUDA Graph capture skipped (%s); using DynamicCache + compiled decode.",
                         exc,
                     )
                     self._cuda_graph = None
+                    self._static_cache = None
+            else:
+                self._static_cache = None
 
             if enable_prefix_cache:
                 try:
@@ -618,7 +621,7 @@ class _StudentRuntime:
         *,
         limit: int,
     ) -> Any:
-        if self._static_cache is not None:
+        if self._static_cache is not None and self._cuda_graph is not None:
             return self._static_cache_greedy_decode(input_ids, limit=limit)
 
         torch = self.torch
