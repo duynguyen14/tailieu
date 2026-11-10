@@ -180,21 +180,13 @@ class _StudentRuntime:
         self._prefix_ids: list[int] = []
         self._prefix_len: int = 0
         self._prefix_kv_snapshot: list[tuple[Any, Any]] | None = None
+        self._dynamic_prefix_kv: list[tuple[Any, Any]] | None = None
 
-        if self.device.startswith("cuda") and settings.production_student_use_cuda_graph:
-            try:
-                self._init_cuda_graph_decoder(
-                    enable_prefix_cache=settings.production_student_enable_prefix_cache
-                )
-            except Exception as exc:
-                LOGGER.warning(
-                    "Could not initialize manual CUDA Graph decoder (%s); "
-                    "falling back to standard decode loop.",
-                    exc,
-                )
-                self._cuda_graph = None
-                self._static_cache = None
-                self._prefix_kv_snapshot = None
+        if self.device.startswith("cuda"):
+            self._init_static_and_prefix_cache(
+                enable_cuda_graph=settings.production_student_use_cuda_graph,
+                enable_prefix_cache=settings.production_student_enable_prefix_cache,
+            )
 
         self.compiled = False
         if (
@@ -306,88 +298,107 @@ class _StudentRuntime:
             return True
         return False
 
-    def _init_cuda_graph_decoder(self, *, enable_prefix_cache: bool) -> None:
+    def _init_static_and_prefix_cache(
+        self, *, enable_cuda_graph: bool, enable_prefix_cache: bool
+    ) -> None:
         from transformers.cache_utils import StaticCache
 
         torch = self.torch
-        try:
-            self._static_cache = StaticCache(
-                config=self.model.config,
-                max_batch_size=1,
-                max_cache_len=self._max_cache_len,
-                device=self.device,
-                dtype=self.model.dtype,
-            )
-        except TypeError:
-            self._static_cache = StaticCache(
-                config=self.model.config,
-                max_cache_len=self._max_cache_len,
-            )
-
-        self._graph_input_ids = torch.zeros((1, 1), dtype=torch.long, device=self.device)
-        self._graph_cache_position = torch.zeros((1,), dtype=torch.long, device=self.device)
-
-        with torch.inference_mode():
-            self._reset_static_cache()
-            # Test prefill and initialize lazy StaticCache layer buffers on self.device
-            dummy_ids = torch.zeros((1, 8), dtype=torch.long, device=self.device)
-            dummy_pos = torch.arange(0, 8, dtype=torch.long, device=self.device)
+        with torch.cuda.device(self.device), torch.inference_mode():
             try:
-                self._eager_forward(
-                    input_ids=dummy_ids,
-                    past_key_values=self._static_cache,
-                    cache_position=dummy_pos,
-                    use_cache=True,
-                    return_dict=True,
-                    logits_to_keep=1,
+                self._static_cache = StaticCache(
+                    config=self.model.config,
+                    max_batch_size=1,
+                    max_cache_len=self._max_cache_len,
+                    device=self.device,
+                    dtype=self.model.dtype,
                 )
-            except TypeError:
-                self._supports_logits_to_keep = False
-                self._eager_forward(
-                    input_ids=dummy_ids,
-                    past_key_values=self._static_cache,
-                    cache_position=dummy_pos,
-                    use_cache=True,
-                    return_dict=True,
-                )
+                self._reset_static_cache()
+                dummy_ids = torch.zeros((1, 8), dtype=torch.long, device=self.device)
+                dummy_pos = torch.arange(0, 8, dtype=torch.long, device=self.device)
+                try:
+                    self._eager_forward(
+                        input_ids=dummy_ids,
+                        past_key_values=self._static_cache,
+                        cache_position=dummy_pos,
+                        use_cache=True,
+                        return_dict=True,
+                        logits_to_keep=1,
+                    )
+                except TypeError:
+                    self._supports_logits_to_keep = False
+                    self._eager_forward(
+                        input_ids=dummy_ids,
+                        past_key_values=self._static_cache,
+                        cache_position=dummy_pos,
+                        use_cache=True,
+                        return_dict=True,
+                    )
+            except Exception as exc:
+                LOGGER.warning("Could not initialize StaticCache (%s).", exc)
+                self._static_cache = None
 
-            step_extra = {"logits_to_keep": 1} if self._supports_logits_to_keep else {}
+            if enable_cuda_graph and self._static_cache is not None:
+                try:
+                    self._graph_input_ids = torch.zeros(
+                        (1, 1), dtype=torch.long, device=self.device
+                    )
+                    self._graph_cache_position = torch.zeros(
+                        (1,), dtype=torch.long, device=self.device
+                    )
+                    step_extra = (
+                        {"logits_to_keep": 1} if self._supports_logits_to_keep else {}
+                    )
+                    capture_stream = torch.cuda.Stream(device=self.device)
+                    capture_stream.wait_stream(torch.cuda.current_stream(self.device))
+                    with torch.cuda.stream(capture_stream):
+                        for pos in (8, 9, 10):
+                            self._graph_cache_position.fill_(pos)
+                            out = self._eager_forward(
+                                input_ids=self._graph_input_ids,
+                                past_key_values=self._static_cache,
+                                cache_position=self._graph_cache_position,
+                                position_ids=self._graph_cache_position.unsqueeze(0),
+                                use_cache=True,
+                                return_dict=True,
+                                **step_extra,
+                            )
+                            self._graph_next_token = out.logits[:, -1:, :].argmax(dim=-1)
+                    torch.cuda.current_stream(self.device).wait_stream(capture_stream)
+                    torch.cuda.synchronize(self.device)
 
-            # Warmup 3 single-token decode steps before capturing the CUDA Graph
-            for pos in (8, 9, 10):
-                self._graph_cache_position.fill_(pos)
-                out = self._eager_forward(
-                    input_ids=self._graph_input_ids,
-                    past_key_values=self._static_cache,
-                    cache_position=self._graph_cache_position,
-                    use_cache=True,
-                    return_dict=True,
-                    **step_extra,
-                )
-                self._graph_next_token = out.logits[:, -1:, :].argmax(dim=-1)
-
-            torch.cuda.synchronize(self.device)
-            graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graph):
-                out = self._eager_forward(
-                    input_ids=self._graph_input_ids,
-                    past_key_values=self._static_cache,
-                    cache_position=self._graph_cache_position,
-                    use_cache=True,
-                    return_dict=True,
-                    **step_extra,
-                )
-                self._graph_next_token = out.logits[:, -1:, :].argmax(dim=-1)
-            torch.cuda.synchronize(self.device)
-            self._cuda_graph = graph
+                    graph = torch.cuda.CUDAGraph()
+                    with torch.cuda.graph(graph, stream=capture_stream):
+                        out = self._eager_forward(
+                            input_ids=self._graph_input_ids,
+                            past_key_values=self._static_cache,
+                            cache_position=self._graph_cache_position,
+                            position_ids=self._graph_cache_position.unsqueeze(0),
+                            use_cache=True,
+                            return_dict=True,
+                            **step_extra,
+                        )
+                        self._graph_next_token = out.logits[:, -1:, :].argmax(dim=-1)
+                    torch.cuda.synchronize(self.device)
+                    self._cuda_graph = graph
+                except Exception as exc:
+                    LOGGER.info(
+                        "Manual CUDA Graph capture skipped (%s); using StaticCache + compiled decode.",
+                        exc,
+                    )
+                    self._cuda_graph = None
 
             if enable_prefix_cache:
-                self._precompute_instruction_prefix_cache()
+                try:
+                    self._precompute_instruction_prefix_cache()
+                except Exception as exc:
+                    LOGGER.warning("Could not precompute prefix KV cache: %s", exc)
 
         LOGGER.info(
-            "Initialized manual CUDA Graph + StaticCache student decoder; "
-            "device=%s prefix_cached_tokens=%d",
+            "Initialized student decoder; device=%s static_cache=%s cuda_graph=%s prefix_cached_tokens=%d",
             self.device,
+            self._static_cache is not None,
+            self._cuda_graph is not None,
             self._prefix_len,
         )
 
@@ -411,22 +422,59 @@ class _StudentRuntime:
         if safe_len <= 16:
             return
         safe_prefix_tensor = prefix_ids_tensor[:, :safe_len]
-        self._reset_static_cache()
-        cache_pos = torch.arange(0, safe_len, dtype=torch.long, device=self.device)
         step_extra = {"logits_to_keep": 1} if self._supports_logits_to_keep else {}
-        self._eager_forward(
+
+        if self._static_cache is not None:
+            self._reset_static_cache()
+            cache_pos = torch.arange(0, safe_len, dtype=torch.long, device=self.device)
+            self._eager_forward(
+                input_ids=safe_prefix_tensor,
+                past_key_values=self._static_cache,
+                cache_position=cache_pos,
+                use_cache=True,
+                return_dict=True,
+                **step_extra,
+            )
+            snapshot = self._snapshot_static_cache_prefix(safe_len)
+            if snapshot is not None:
+                self._prefix_ids = safe_prefix_tensor[0].tolist()
+                self._prefix_len = safe_len
+                self._prefix_kv_snapshot = snapshot
+
+        # Also snapshot DynamicCache layers for non-CUDA-graph path
+        dyn_out = self._eager_forward(
             input_ids=safe_prefix_tensor,
-            past_key_values=self._static_cache,
-            cache_position=cache_pos,
             use_cache=True,
             return_dict=True,
             **step_extra,
         )
-        snapshot = self._snapshot_static_cache_prefix(safe_len)
-        if snapshot is not None:
+        dyn_kv = dyn_out.past_key_values
+        dyn_layers = getattr(dyn_kv, "layers", None)
+        if dyn_layers and all(
+            hasattr(layer, "keys") and hasattr(layer, "values") for layer in dyn_layers
+        ):
+            self._dynamic_prefix_kv = [
+                (layer.keys.clone(), layer.values.clone()) for layer in dyn_layers
+            ]
             self._prefix_ids = safe_prefix_tensor[0].tolist()
             self._prefix_len = safe_len
-            self._prefix_kv_snapshot = snapshot
+        elif hasattr(dyn_kv, "key_cache") and hasattr(dyn_kv, "value_cache"):
+            self._dynamic_prefix_kv = [
+                (k.clone(), v.clone())
+                for k, v in zip(dyn_kv.key_cache, dyn_kv.value_cache, strict=True)
+            ]
+            self._prefix_ids = safe_prefix_tensor[0].tolist()
+            self._prefix_len = safe_len
+
+    def _build_dynamic_prefix_cache(self) -> Any | None:
+        if not self._dynamic_prefix_kv or self._prefix_len <= 0:
+            return None
+        from transformers.cache_utils import DynamicCache
+
+        cache = DynamicCache()
+        for idx, (k_snap, v_snap) in enumerate(self._dynamic_prefix_kv):
+            cache.update(k_snap.clone(), v_snap.clone(), idx)
+        return cache
 
     def _resolve_device(self, settings: Settings) -> str:
         torch = self.torch
@@ -468,7 +516,7 @@ class _StudentRuntime:
         warmup_tokens = 4 if (self.compiled or self._cuda_graph is not None) else 1
         self.generate("Warm-up only.", max_new_tokens=warmup_tokens, validate=False)
 
-    def _cuda_graph_greedy_decode(
+    def _static_cache_greedy_decode(
         self,
         input_ids: Any,
         *,
@@ -476,10 +524,6 @@ class _StudentRuntime:
     ) -> Any:
         torch = self.torch
         assert self._static_cache is not None
-        assert self._cuda_graph is not None
-        assert self._graph_input_ids is not None
-        assert self._graph_cache_position is not None
-        assert self._graph_next_token is not None
 
         stop_set = set(self.stop_token_ids)
         stop_tensor = torch.tensor(
@@ -525,18 +569,37 @@ class _StudentRuntime:
         if limit <= 1:
             return next_token[0]
 
+        use_graph = (
+            self._cuda_graph is not None
+            and self._graph_input_ids is not None
+            and self._graph_cache_position is not None
+            and self._graph_next_token is not None
+        )
         cur_pos = prompt_len
+        pos_tensor = torch.zeros((1,), dtype=torch.long, device=self.device)
+
         for step in range(1, limit):
             if cur_pos >= self._max_cache_len - 1:
                 break
-            self._graph_input_ids.copy_(next_token)
-            self._graph_cache_position.fill_(cur_pos)
-            self._cuda_graph.replay()
-            next_token = self._graph_next_token.clone()
+            if use_graph:
+                self._graph_input_ids.copy_(next_token)
+                self._graph_cache_position.fill_(cur_pos)
+                self._cuda_graph.replay()
+                next_token = self._graph_next_token.clone()
+            else:
+                pos_tensor.fill_(cur_pos)
+                step_out = self.model.forward(
+                    input_ids=next_token,
+                    past_key_values=self._static_cache,
+                    cache_position=pos_tensor,
+                    position_ids=pos_tensor.unsqueeze(0),
+                    use_cache=True,
+                    return_dict=True,
+                    **step_extra,
+                )
+                next_token = step_out.logits[:, -1:, :].argmax(dim=-1)
             generated_tokens.append(next_token)
             cur_pos += 1
-            # Synchronize to check EOS only every 16 tokens so the GPU executes
-            # 16 full CUDA graphs back-to-back without any CPU stall.
             if (step & 15) == 0 or step == limit - 1:
                 if torch.isin(torch.cat(generated_tokens[-16:], dim=-1), stop_tensor).any():
                     break
@@ -555,25 +618,45 @@ class _StudentRuntime:
         *,
         limit: int,
     ) -> Any:
-        if self._cuda_graph is not None and self._static_cache is not None:
-            return self._cuda_graph_greedy_decode(input_ids, limit=limit)
+        if self._static_cache is not None:
+            return self._static_cache_greedy_decode(input_ids, limit=limit)
 
         torch = self.torch
         stop_set = set(self.stop_token_ids)
         stop_tensor = torch.tensor(
             self.stop_token_ids, device=input_ids.device, dtype=input_ids.dtype
         )
-        prefill_kwargs: dict[str, Any] = {
-            "input_ids": input_ids,
-            "use_cache": True,
-            "return_dict": True,
-        }
-        if attention_mask is not None:
-            prefill_kwargs["attention_mask"] = attention_mask
+        prompt_len = int(input_ids.shape[-1])
         step_extra: dict[str, Any] = (
             {"logits_to_keep": 1} if self._supports_logits_to_keep else {}
         )
-        prefill_out = self._eager_forward(**prefill_kwargs, **step_extra)
+        prefix_cache = (
+            self._build_dynamic_prefix_cache()
+            if (
+                self._prefix_len > 0
+                and prompt_len > self._prefix_len
+                and input_ids[0, : self._prefix_len].tolist() == self._prefix_ids
+            )
+            else None
+        )
+        if prefix_cache is not None:
+            suffix_ids = input_ids[:, self._prefix_len :]
+            prefill_out = self._eager_forward(
+                input_ids=suffix_ids,
+                past_key_values=prefix_cache,
+                use_cache=True,
+                return_dict=True,
+                **step_extra,
+            )
+        else:
+            prefill_kwargs: dict[str, Any] = {
+                "input_ids": input_ids,
+                "use_cache": True,
+                "return_dict": True,
+            }
+            if attention_mask is not None:
+                prefill_kwargs["attention_mask"] = attention_mask
+            prefill_out = self._eager_forward(**prefill_kwargs, **step_extra)
 
         past_key_values = prefill_out.past_key_values
         next_token = prefill_out.logits[:, -1:, :].argmax(dim=-1)
@@ -592,8 +675,8 @@ class _StudentRuntime:
             past_key_values = step_out.past_key_values
             next_token = step_out.logits[:, -1:, :].argmax(dim=-1)
             generated_tokens.append(next_token)
-            if (step & 7) == 0 or step == limit - 1:
-                if torch.isin(torch.cat(generated_tokens[-8:], dim=-1), stop_tensor).any():
+            if (step & 15) == 0 or step == limit - 1:
+                if torch.isin(torch.cat(generated_tokens[-16:], dim=-1), stop_tensor).any():
                     break
 
         all_tokens = torch.cat(generated_tokens, dim=-1)[0]
