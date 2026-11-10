@@ -238,6 +238,14 @@ class Settings(BaseSettings):
     production_student_torch_compile: bool = True
     production_student_torch_compile_mode: str = "default"
     production_student_cache_implementation: str = "static"
+    production_student_use_cuda_graph: bool = True
+    production_student_enable_prefix_cache: bool = True
+    production_student_api_base_url: str | None = None
+    production_student_api_key: SecretStr | None = None
+    production_student_api_model: str = "student-extractor"
+    production_student_api_timeout_seconds: float = Field(
+        default=120.0, ge=1.0, le=3600.0
+    )
     production_ocr_page_types: str = (
         "DIPLOMATIC_NOTE,APPLICANT_TABLE,APPLICANT_LIST"
     )
@@ -289,6 +297,13 @@ class Settings(BaseSettings):
                 "PRODUCTION_STUDENT_CACHE_IMPLEMENTATION must be dynamic or static."
             )
         return normalized
+
+    @field_validator("production_student_api_base_url", mode="before")
+    @classmethod
+    def empty_student_api_url_is_none(cls, value):
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @field_validator(
         "page_classifier_model_path",

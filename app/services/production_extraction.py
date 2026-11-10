@@ -79,6 +79,29 @@ class _OcrPage:
 
 class _StudentRuntime:
     def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.api_base_url = (
+            settings.production_student_api_base_url.strip().rstrip("/")
+            if settings.production_student_api_base_url
+            else None
+        )
+        self.max_input_tokens = settings.production_student_max_input_tokens
+        self.max_new_tokens = settings.production_student_max_new_tokens
+        self._api_client: httpx.Client | None = None
+
+        if self.api_base_url:
+            self.device = f"api:{self.api_base_url}"
+            self.model_dir = Path(settings.production_student_api_model)
+            self._api_client = httpx.Client(
+                timeout=settings.production_student_api_timeout_seconds
+            )
+            LOGGER.info(
+                "Initialized remote student API runtime; base_url=%s model=%s",
+                self.api_base_url,
+                settings.production_student_api_model,
+            )
+            return
+
         import torch
         import transformers
         from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -140,17 +163,43 @@ class _StudentRuntime:
             if hasattr(torch, "set_float32_matmul_precision"):
                 torch.set_float32_matmul_precision("high")
         self.stop_token_ids = generation_stop_token_ids(self.tokenizer, self.model)
-        self.max_input_tokens = settings.production_student_max_input_tokens
-        self.max_new_tokens = settings.production_student_max_new_tokens
-        self.cache_implementation = (
-            settings.production_student_cache_implementation
-            if self.device.startswith("cuda")
-            else "dynamic"
-        )
         self._eager_forward = self.model.forward
+        self._supports_logits_to_keep = True
+
+        # Pre-allocated StaticCache + explicit CUDA Graph state for zero-overhead
+        # 1-token decoding on GPU.
+        self._static_cache: Any | None = None
+        self._cuda_graph: Any | None = None
+        self._graph_input_ids: Any | None = None
+        self._graph_cache_position: Any | None = None
+        self._graph_next_token: Any | None = None
+        self._max_cache_len = self.max_input_tokens + self.max_new_tokens + 64
+
+        # Immutable prefix KV cache for the static instruction header preceding
+        # DOCUMENT_TEXT so every request skips prefilling those ~200 tokens.
+        self._prefix_ids: list[int] = []
+        self._prefix_len: int = 0
+        self._prefix_kv_snapshot: list[tuple[Any, Any]] | None = None
+
+        if self.device.startswith("cuda") and settings.production_student_use_cuda_graph:
+            try:
+                self._init_cuda_graph_decoder(
+                    enable_prefix_cache=settings.production_student_enable_prefix_cache
+                )
+            except Exception as exc:
+                LOGGER.warning(
+                    "Could not initialize manual CUDA Graph decoder (%s); "
+                    "falling back to standard decode loop.",
+                    exc,
+                )
+                self._cuda_graph = None
+                self._static_cache = None
+                self._prefix_kv_snapshot = None
+
         self.compiled = False
         if (
-            self.device.startswith("cuda")
+            self._cuda_graph is None
+            and self.device.startswith("cuda")
             and settings.production_student_torch_compile
             and hasattr(torch, "compile")
         ):
@@ -160,8 +209,7 @@ class _StudentRuntime:
             if not (include_dir / "Python.h").is_file():
                 LOGGER.warning(
                     "Skipping torch.compile because Python development headers "
-                    "(Python.h) are not installed in %s. Install python3-dev on "
-                    "Linux to enable Inductor/Triton compilation.",
+                    "(Python.h) are not installed in %s.",
                     include_dir,
                 )
             else:
@@ -172,28 +220,20 @@ class _StudentRuntime:
                         fullgraph=False,
                         dynamic=True,
                     )
-                    mark_step = getattr(
-                        getattr(torch, "compiler", None),
-                        "cudagraph_mark_step_begin",
-                        None,
-                    )
 
                     def _selective_forward(*args: Any, **kwargs: Any) -> Any:
                         input_ids = kwargs.get("input_ids")
                         if input_ids is None and args:
                             input_ids = args[0]
                         if input_ids is not None and input_ids.shape[-1] == 1:
-                            if callable(mark_step):
-                                mark_step()
                             return compiled_fn(*args, **kwargs)
                         return self._eager_forward(*args, **kwargs)
 
                     self.model.forward = _selective_forward
                     self.compiled = True
                     LOGGER.info(
-                        "Enabled selective decode torch.compile for student runtime; mode=%s cache=%s",
+                        "Enabled selective decode torch.compile for student runtime; mode=%s",
                         settings.production_student_torch_compile_mode,
-                        self.cache_implementation,
                     )
                 except Exception as exc:
                     LOGGER.warning(
@@ -202,6 +242,191 @@ class _StudentRuntime:
                     )
                     self.model.forward = self._eager_forward
                     self.compiled = False
+
+    def _reset_static_cache(self) -> None:
+        if self._static_cache is None:
+            return
+        if hasattr(self._static_cache, "reset"):
+            self._static_cache.reset()
+            return
+        for layer in getattr(self._static_cache, "layers", []):
+            if hasattr(layer, "keys") and layer.keys is not None:
+                layer.keys.zero_()
+            if hasattr(layer, "values") and layer.values is not None:
+                layer.values.zero_()
+            if hasattr(layer, "cumulative_length"):
+                layer.cumulative_length.zero_()
+
+    def _snapshot_static_cache_prefix(self, length: int) -> list[tuple[Any, Any]] | None:
+        if self._static_cache is None or length <= 0:
+            return None
+        layers = getattr(self._static_cache, "layers", None)
+        if layers:
+            snapshot: list[tuple[Any, Any]] = []
+            for layer in layers:
+                if not hasattr(layer, "keys") or not hasattr(layer, "values"):
+                    return None
+                snapshot.append(
+                    (
+                        layer.keys[:, :, :length, :].clone(),
+                        layer.values[:, :, :length, :].clone(),
+                    )
+                )
+            return snapshot
+        key_cache = getattr(self._static_cache, "key_cache", None)
+        value_cache = getattr(self._static_cache, "value_cache", None)
+        if key_cache and value_cache:
+            return [
+                (k[:, :, :length, :].clone(), v[:, :, :length, :].clone())
+                for k, v in zip(key_cache, value_cache, strict=True)
+            ]
+        return None
+
+    def _restore_static_cache_prefix(self) -> bool:
+        if self._static_cache is None or not self._prefix_kv_snapshot or self._prefix_len <= 0:
+            return False
+        self._reset_static_cache()
+        length = self._prefix_len
+        layers = getattr(self._static_cache, "layers", None)
+        if layers:
+            for layer, (k_snap, v_snap) in zip(layers, self._prefix_kv_snapshot, strict=True):
+                layer.keys[:, :, :length, :].copy_(k_snap)
+                layer.values[:, :, :length, :].copy_(v_snap)
+                if hasattr(layer, "cumulative_length"):
+                    layer.cumulative_length.fill_(length)
+            return True
+        key_cache = getattr(self._static_cache, "key_cache", None)
+        value_cache = getattr(self._static_cache, "value_cache", None)
+        if key_cache and value_cache:
+            for k_buf, v_buf, (k_snap, v_snap) in zip(
+                key_cache, value_cache, self._prefix_kv_snapshot, strict=True
+            ):
+                k_buf[:, :, :length, :].copy_(k_snap)
+                v_buf[:, :, :length, :].copy_(v_snap)
+            return True
+        return False
+
+    def _init_cuda_graph_decoder(self, *, enable_prefix_cache: bool) -> None:
+        from transformers.cache_utils import StaticCache
+
+        torch = self.torch
+        try:
+            self._static_cache = StaticCache(
+                config=self.model.config,
+                max_batch_size=1,
+                max_cache_len=self._max_cache_len,
+                device=self.device,
+                dtype=self.model.dtype,
+            )
+        except TypeError:
+            self._static_cache = StaticCache(
+                config=self.model.config,
+                max_cache_len=self._max_cache_len,
+            )
+
+        self._graph_input_ids = torch.zeros((1, 1), dtype=torch.long, device=self.device)
+        self._graph_cache_position = torch.zeros((1,), dtype=torch.long, device=self.device)
+
+        with torch.inference_mode():
+            self._reset_static_cache()
+            # Test prefill and initialize lazy StaticCache layer buffers on self.device
+            dummy_ids = torch.zeros((1, 8), dtype=torch.long, device=self.device)
+            dummy_pos = torch.arange(0, 8, dtype=torch.long, device=self.device)
+            try:
+                self._eager_forward(
+                    input_ids=dummy_ids,
+                    past_key_values=self._static_cache,
+                    cache_position=dummy_pos,
+                    use_cache=True,
+                    return_dict=True,
+                    logits_to_keep=1,
+                )
+            except TypeError:
+                self._supports_logits_to_keep = False
+                self._eager_forward(
+                    input_ids=dummy_ids,
+                    past_key_values=self._static_cache,
+                    cache_position=dummy_pos,
+                    use_cache=True,
+                    return_dict=True,
+                )
+
+            step_extra = {"logits_to_keep": 1} if self._supports_logits_to_keep else {}
+
+            # Warmup 3 single-token decode steps before capturing the CUDA Graph
+            for pos in (8, 9, 10):
+                self._graph_cache_position.fill_(pos)
+                out = self._eager_forward(
+                    input_ids=self._graph_input_ids,
+                    past_key_values=self._static_cache,
+                    cache_position=self._graph_cache_position,
+                    use_cache=True,
+                    return_dict=True,
+                    **step_extra,
+                )
+                self._graph_next_token = out.logits[:, -1:, :].argmax(dim=-1)
+
+            torch.cuda.synchronize(self.device)
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                out = self._eager_forward(
+                    input_ids=self._graph_input_ids,
+                    past_key_values=self._static_cache,
+                    cache_position=self._graph_cache_position,
+                    use_cache=True,
+                    return_dict=True,
+                    **step_extra,
+                )
+                self._graph_next_token = out.logits[:, -1:, :].argmax(dim=-1)
+            torch.cuda.synchronize(self.device)
+            self._cuda_graph = graph
+
+            if enable_prefix_cache:
+                self._precompute_instruction_prefix_cache()
+
+        LOGGER.info(
+            "Initialized manual CUDA Graph + StaticCache student decoder; "
+            "device=%s prefix_cached_tokens=%d",
+            self.device,
+            self._prefix_len,
+        )
+
+    def _precompute_instruction_prefix_cache(self) -> None:
+        torch = self.torch
+        marker = "DOCUMENT_TEXT_MARKER_987654321"
+        sample_prompt = apply_student_chat_template(
+            self.tokenizer,
+            [{"role": "user", "content": build_student_user_prompt(marker)}],
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        prefix_text = sample_prompt.split(marker, maxsplit=1)[0]
+        if not prefix_text:
+            return
+        encoded = self.tokenizer(prefix_text, return_tensors="pt", add_special_tokens=False)
+        prefix_ids_tensor = encoded["input_ids"].to(self.device)
+        # Keep the last 2 tokens out of the frozen prefix so BPE boundary merges
+        # with the first document character never alter tokenization.
+        safe_len = int(prefix_ids_tensor.shape[-1]) - 2
+        if safe_len <= 16:
+            return
+        safe_prefix_tensor = prefix_ids_tensor[:, :safe_len]
+        self._reset_static_cache()
+        cache_pos = torch.arange(0, safe_len, dtype=torch.long, device=self.device)
+        step_extra = {"logits_to_keep": 1} if self._supports_logits_to_keep else {}
+        self._eager_forward(
+            input_ids=safe_prefix_tensor,
+            past_key_values=self._static_cache,
+            cache_position=cache_pos,
+            use_cache=True,
+            return_dict=True,
+            **step_extra,
+        )
+        snapshot = self._snapshot_static_cache_prefix(safe_len)
+        if snapshot is not None:
+            self._prefix_ids = safe_prefix_tensor[0].tolist()
+            self._prefix_len = safe_len
+            self._prefix_kv_snapshot = snapshot
 
     def _resolve_device(self, settings: Settings) -> str:
         torch = self.torch
@@ -238,11 +463,90 @@ class _StudentRuntime:
         }
 
     def warmup(self) -> None:
-        # Generate a few tokens during warm-up so both prefill (prompt) and
-        # decode (1-token autoregressive step) kernels are compiled before
-        # readiness becomes true.
-        warmup_tokens = 4 if self.compiled else 1
+        if self.api_base_url:
+            return
+        warmup_tokens = 4 if (self.compiled or self._cuda_graph is not None) else 1
         self.generate("Warm-up only.", max_new_tokens=warmup_tokens, validate=False)
+
+    def _cuda_graph_greedy_decode(
+        self,
+        input_ids: Any,
+        *,
+        limit: int,
+    ) -> Any:
+        torch = self.torch
+        assert self._static_cache is not None
+        assert self._cuda_graph is not None
+        assert self._graph_input_ids is not None
+        assert self._graph_cache_position is not None
+        assert self._graph_next_token is not None
+
+        stop_set = set(self.stop_token_ids)
+        stop_tensor = torch.tensor(
+            self.stop_token_ids, device=input_ids.device, dtype=input_ids.dtype
+        )
+        prompt_len = int(input_ids.shape[-1])
+        step_extra = {"logits_to_keep": 1} if self._supports_logits_to_keep else {}
+
+        # Use precomputed instruction KV cache if the prompt begins with the exact
+        # cached prefix tokens (saves ~180 tokens of prefill compute every request).
+        if (
+            self._prefix_len > 0
+            and prompt_len > self._prefix_len
+            and input_ids[0, : self._prefix_len].tolist() == self._prefix_ids
+            and self._restore_static_cache_prefix()
+        ):
+            suffix_ids = input_ids[:, self._prefix_len :]
+            cache_pos = torch.arange(
+                self._prefix_len, prompt_len, dtype=torch.long, device=self.device
+            )
+            prefill_out = self._eager_forward(
+                input_ids=suffix_ids,
+                past_key_values=self._static_cache,
+                cache_position=cache_pos,
+                use_cache=True,
+                return_dict=True,
+                **step_extra,
+            )
+        else:
+            self._reset_static_cache()
+            cache_pos = torch.arange(0, prompt_len, dtype=torch.long, device=self.device)
+            prefill_out = self._eager_forward(
+                input_ids=input_ids,
+                past_key_values=self._static_cache,
+                cache_position=cache_pos,
+                use_cache=True,
+                return_dict=True,
+                **step_extra,
+            )
+
+        next_token = prefill_out.logits[:, -1:, :].argmax(dim=-1).clone()
+        generated_tokens = [next_token]
+        if limit <= 1:
+            return next_token[0]
+
+        cur_pos = prompt_len
+        for step in range(1, limit):
+            if cur_pos >= self._max_cache_len - 1:
+                break
+            self._graph_input_ids.copy_(next_token)
+            self._graph_cache_position.fill_(cur_pos)
+            self._cuda_graph.replay()
+            next_token = self._graph_next_token.clone()
+            generated_tokens.append(next_token)
+            cur_pos += 1
+            # Synchronize to check EOS only every 16 tokens so the GPU executes
+            # 16 full CUDA graphs back-to-back without any CPU stall.
+            if (step & 15) == 0 or step == limit - 1:
+                if torch.isin(torch.cat(generated_tokens[-16:], dim=-1), stop_tensor).any():
+                    break
+
+        all_tokens = torch.cat(generated_tokens, dim=-1)[0]
+        token_list = all_tokens.tolist()
+        for idx, tok in enumerate(token_list):
+            if tok in stop_set:
+                return all_tokens[: idx + 1]
+        return all_tokens
 
     def _fast_greedy_decode(
         self,
@@ -251,6 +555,9 @@ class _StudentRuntime:
         *,
         limit: int,
     ) -> Any:
+        if self._cuda_graph is not None and self._static_cache is not None:
+            return self._cuda_graph_greedy_decode(input_ids, limit=limit)
+
         torch = self.torch
         stop_set = set(self.stop_token_ids)
         stop_tensor = torch.tensor(
@@ -263,12 +570,10 @@ class _StudentRuntime:
         }
         if attention_mask is not None:
             prefill_kwargs["attention_mask"] = attention_mask
-        supports_logits_to_keep = True
-        try:
-            prefill_out = self._eager_forward(**prefill_kwargs, logits_to_keep=1)
-        except TypeError:
-            supports_logits_to_keep = False
-            prefill_out = self._eager_forward(**prefill_kwargs)
+        step_extra: dict[str, Any] = (
+            {"logits_to_keep": 1} if self._supports_logits_to_keep else {}
+        )
+        prefill_out = self._eager_forward(**prefill_kwargs, **step_extra)
 
         past_key_values = prefill_out.past_key_values
         next_token = prefill_out.logits[:, -1:, :].argmax(dim=-1)
@@ -276,7 +581,6 @@ class _StudentRuntime:
         if limit <= 1 or int(next_token.item()) in stop_set:
             return torch.cat(generated_tokens, dim=-1)[0]
 
-        step_extra: dict[str, Any] = {"logits_to_keep": 1} if supports_logits_to_keep else {}
         for step in range(1, limit):
             step_out = self.model.forward(
                 input_ids=next_token,
@@ -288,8 +592,6 @@ class _StudentRuntime:
             past_key_values = step_out.past_key_values
             next_token = step_out.logits[:, -1:, :].argmax(dim=-1)
             generated_tokens.append(next_token)
-            # Check EOS on GPU every 8 tokens (or immediately if token matches stop_tensor)
-            # to avoid blocking GPU->CPU synchronization on every single token.
             if (step & 7) == 0 or step == limit - 1:
                 if torch.isin(torch.cat(generated_tokens[-8:], dim=-1), stop_tensor).any():
                     break
@@ -301,6 +603,61 @@ class _StudentRuntime:
                 return all_tokens[: idx + 1]
         return all_tokens
 
+    def _generate_via_api(
+        self,
+        text: str,
+        *,
+        max_new_tokens: int | None = None,
+        validate: bool = True,
+    ) -> tuple[dict[str, Any], int, float]:
+        assert self._api_client is not None
+        assert self.api_base_url is not None
+        headers: dict[str, str] = {}
+        if self.settings.production_student_api_key is not None:
+            key = self.settings.production_student_api_key.get_secret_value().strip()
+            if key:
+                headers["Authorization"] = f"Bearer {key}"
+        payload: dict[str, Any] = {
+            "model": self.settings.production_student_api_model,
+            "messages": [{"role": "user", "content": build_student_user_prompt(text)}],
+            "temperature": 0.0,
+            "max_tokens": max_new_tokens or self.max_new_tokens,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+        started = time.perf_counter()
+        try:
+            response = self._api_client.post(
+                f"{self.api_base_url}/chat/completions",
+                json=payload,
+                headers=headers,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except Exception as exc:
+            raise ProductionExtractionError(f"Student API request failed: {exc}") from exc
+        latency_ms = (time.perf_counter() - started) * 1000
+        try:
+            raw = str(data["choices"][0]["message"]["content"]).strip()
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ProductionExtractionError(
+                f"Student API returned an invalid response payload: {exc}"
+            ) from exc
+        usage = data.get("usage") if isinstance(data, dict) else None
+        generated_tokens = (
+            int(usage.get("completion_tokens", 0))
+            if isinstance(usage, dict)
+            else max(1, len(raw) // 4)
+        )
+        if not validate:
+            return {}, generated_tokens, latency_ms
+        try:
+            parsed = parse_student_json_output(raw)
+            return self._normalize_target(parsed), generated_tokens, latency_ms
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise ProductionExtractionError(
+                f"Student model returned invalid compact JSON: {exc}"
+            ) from exc
+
     def generate(
         self,
         text: str,
@@ -308,6 +665,10 @@ class _StudentRuntime:
         max_new_tokens: int | None = None,
         validate: bool = True,
     ) -> tuple[dict[str, Any], int, float]:
+        if self.api_base_url:
+            return self._generate_via_api(
+                text, max_new_tokens=max_new_tokens, validate=validate
+            )
         prompt = apply_student_chat_template(
             self.tokenizer,
             [{"role": "user", "content": build_student_user_prompt(text)}],
@@ -338,12 +699,13 @@ class _StudentRuntime:
                     "Fast greedy student decode failed (%s); falling back to model.generate.",
                     exc,
                 )
+                self._cuda_graph = None
+                self._static_cache = None
                 if self.compiled:
                     self.model.forward = self._eager_forward
                     self.compiled = False
                     if hasattr(self.torch, "_dynamo"):
                         self.torch._dynamo.reset()
-                self.cache_implementation = "dynamic"
                 generated = self.model.generate(
                     **encoded,
                     max_new_tokens=limit,
