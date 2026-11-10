@@ -7,9 +7,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.annotation_routes import router as annotation_router
-from app.api.ocr_review_routes import router as ocr_review_router
 from app.api.kie_review_routes import router as kie_review_router
+from app.api.ocr_review_routes import router as ocr_review_router
 from app.api.page_label_audit_routes import router as page_label_audit_router
+from app.api.production_classification_routes import router as production_classification_router
 from app.api.production_extraction_routes import router as production_extraction_router
 from app.api.routes import router
 from app.api.table_annotation_routes import router as table_annotation_router
@@ -21,8 +22,8 @@ from app.core.runtime import resolve_runtime
 from app.db.database import Database
 from app.models.factory import build_model_bundle
 from app.services.annotation import AnnotationService
-from app.services.ocr_review import OcrReviewService
 from app.services.kie_review import KieReviewService
+from app.services.ocr_review import OcrReviewService
 from app.services.page_label_audit import PageLabelAuditService
 from app.services.pdf_renderer import PdfRenderer
 from app.services.pipeline import DocumentPipeline
@@ -138,6 +139,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(text_reconstruction_router, prefix=settings.api_prefix)
     app.include_router(teacher_extraction_router, prefix=settings.api_prefix)
     app.include_router(kie_review_router, prefix=settings.api_prefix)
+    app.include_router(production_classification_router, prefix=settings.api_prefix)
     app.include_router(production_extraction_router, prefix=settings.api_prefix)
     return app
 

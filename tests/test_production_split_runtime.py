@@ -43,6 +43,19 @@ def test_private_ocr_readiness_reports_disabled_without_loading_paddle() -> None
     }
 
 
+def test_private_classification_preview_rejects_request_when_ocr_is_disabled() -> None:
+    with _disabled_ocr_client() as client:
+        response = client.post(
+            "/internal/v1/ocr/page-classifications",
+            files={"file": ("scan.pdf", b"%PDF-test", "application/pdf")},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Production OCR service is disabled by configuration."
+    )
+
+
 def test_dedicated_public_app_keeps_existing_endpoint_contract() -> None:
     settings = Settings(
         _env_file=None,
@@ -188,3 +201,66 @@ def test_split_runtime_proxies_pdf_text_to_student_and_preserves_diagnostics() -
     assert result.pages[0].ocr_token_count == 7
     assert result.timings.extraction_ms == 34.5
     assert result.warnings == ["example warning"]
+
+
+def test_split_runtime_proxies_page_classification_preview() -> None:
+    settings = _split_settings()
+    service = _service(settings)
+    pdf_bytes = b"%PDF-classification-preview-test"
+    sha256 = hashlib.sha256(pdf_bytes).hexdigest()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url == (
+            "http://ocr.test/internal/v1/ocr/page-classifications"
+        )
+        return httpx.Response(
+            200,
+            json={
+                "filename": "scan.pdf",
+                "sha256": sha256,
+                "page_count": 1,
+                "target_page_types": ["DIPLOMATIC_NOTE"],
+                "pages": [
+                    {
+                        "page_number": 1,
+                        "image_content_type": "image/png",
+                        "image_base64": "aW1hZ2U=",
+                        "width": 1200,
+                        "height": 1600,
+                        "rotation_angle": 0,
+                        "orientation_confidence": 0.99,
+                        "predicted_type": "OTHER",
+                        "confidence": 0.71,
+                        "top_predictions": [
+                            {"label": "OTHER", "confidence": 0.71},
+                            {"label": "DIPLOMATIC_NOTE", "confidence": 0.29},
+                        ],
+                        "is_extraction_target": False,
+                    }
+                ],
+                "timings": {
+                    "render_ms": 1.0,
+                    "orientation_ms": 2.0,
+                    "classification_ms": 3.0,
+                    "total_ms": 6.0,
+                },
+            },
+        )
+
+    service._http_client = httpx.Client(transport=httpx.MockTransport(handler))
+    temp_parent = PROJECT_ROOT / "tmp"
+    temp_parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="classification-preview-", dir=temp_parent) as temp_dir:
+        path = Path(temp_dir) / "scan.pdf"
+        path.write_bytes(pdf_bytes)
+        result = service.preview_page_classifications(
+            pdf_path=path,
+            filename="scan.pdf",
+            sha256=sha256,
+        )
+    service.close()
+
+    assert result.pages[0].predicted_type == "OTHER"
+    assert result.pages[0].is_extraction_target is False
+    assert result.pages[0].top_predictions[1].label == "DIPLOMATIC_NOTE"

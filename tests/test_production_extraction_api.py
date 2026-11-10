@@ -54,3 +54,14 @@ def test_production_upload_is_rejected_until_preloaded_runtime_is_ready() -> Non
     assert response.status_code == 503
     assert response.json()["detail"] == "Production extraction is disabled by configuration."
 
+
+def test_page_classification_preview_is_rejected_when_production_is_disabled() -> None:
+    with _client() as client:
+        response = client.post(
+            "/api/v1/page-classification-preview",
+            files={"file": ("scan.pdf", b"%PDF-test", "application/pdf")},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Production extraction is disabled by configuration."
+

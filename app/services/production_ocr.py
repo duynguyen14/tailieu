@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import logging
 import tempfile
 import threading
@@ -14,6 +15,10 @@ from app.schemas.production_extraction import (
     ProductionModelStatus,
     ProductionOcrResponse,
     ProductionOcrTiming,
+    ProductionPageClassificationPreview,
+    ProductionPageClassificationResponse,
+    ProductionPageClassificationTiming,
+    ProductionPageClassScore,
     ProductionPageResult,
     ProductionReadinessResponse,
 )
@@ -193,13 +198,151 @@ class ProductionOcrService:
                 "The OCR GPU worker is busy. Retry this request shortly."
             )
         try:
-            return self._reconstruct_locked(
+            LOGGER.info(
+                "OCR pipeline started filename=%r sha256=%s",
+                filename,
+                sha256[:12],
+            )
+            result = self._reconstruct_locked(
+                pdf_path=pdf_path,
+                filename=filename,
+                sha256=sha256,
+            )
+            LOGGER.info(
+                "OCR pipeline completed filename=%r pages=%d render_ms=%.1f "
+                "orientation_ms=%.1f classification_ms=%.1f ocr_ms=%.1f "
+                "reconstruction_ms=%.1f total_ms=%.1f",
+                filename,
+                result.page_count,
+                result.timings.render_ms,
+                result.timings.orientation_ms,
+                result.timings.classification_ms,
+                result.timings.ocr_ms,
+                result.timings.reconstruction_ms,
+                result.timings.total_ms,
+            )
+            return result
+        except Exception:
+            LOGGER.exception(
+                "OCR pipeline failed filename=%r sha256=%s",
+                filename,
+                sha256[:12],
+            )
+            raise
+        finally:
+            self._lock.release()
+
+    def preview_page_classifications(
+        self,
+        *,
+        pdf_path: Path,
+        filename: str,
+        sha256: str,
+    ) -> ProductionPageClassificationResponse:
+        if not self._ready:
+            raise ProductionExtractionError(
+                self._error or "Production OCR models are not loaded yet."
+            )
+        if not self._lock.acquire(blocking=False):
+            raise ProductionExtractionError(
+                "The OCR GPU worker is busy. Retry this request shortly."
+            )
+        try:
+            return self._preview_page_classifications_locked(
                 pdf_path=pdf_path,
                 filename=filename,
                 sha256=sha256,
             )
         finally:
             self._lock.release()
+
+    def _preview_page_classifications_locked(
+        self,
+        *,
+        pdf_path: Path,
+        filename: str,
+        sha256: str,
+    ) -> ProductionPageClassificationResponse:
+        assert self._classifier is not None
+        assert self._orientation is not None
+        total_started = time.perf_counter()
+
+        render_started = time.perf_counter()
+        rendered = self.renderer.render(pdf_path)
+        render_ms = (time.perf_counter() - render_started) * 1000
+        LOGGER.info(
+            "OCR stage render filename=%r pages=%d elapsed_ms=%.1f",
+            filename,
+            len(rendered),
+            render_ms,
+        )
+
+        with tempfile.TemporaryDirectory(prefix="production-classification-") as temp_dir:
+            root = Path(temp_dir)
+            orientation_started = time.perf_counter()
+            prepared_pages = self._orient_pages(rendered, root)
+            orientation_ms = (time.perf_counter() - orientation_started) * 1000
+            LOGGER.info(
+                "OCR stage orientation filename=%r pages=%d elapsed_ms=%.1f rotations=%s",
+                filename,
+                len(prepared_pages),
+                orientation_ms,
+                [page.rotation_angle for page in prepared_pages],
+            )
+
+            classification_started = time.perf_counter()
+            predictions = self._classifier.predict_bytes(
+                [page.image_bytes for page in prepared_pages], top_k=3
+            )
+            classification_ms = (time.perf_counter() - classification_started) * 1000
+            LOGGER.info(
+                "Classification preview filename=%r pages=%d elapsed_ms=%.1f predictions=%s",
+                filename,
+                len(predictions),
+                classification_ms,
+                [
+                    f"p{page.page_number}:{prediction.label.value}:{prediction.confidence:.3f}"
+                    for page, prediction in zip(prepared_pages, predictions, strict=True)
+                ],
+            )
+
+            target_types = set(self.settings.production_ocr_page_type_list)
+            pages = [
+                ProductionPageClassificationPreview(
+                    page_number=page.page_number,
+                    image_base64=base64.b64encode(page.image_bytes).decode("ascii"),
+                    width=page.width,
+                    height=page.height,
+                    rotation_angle=page.rotation_angle,
+                    orientation_confidence=page.orientation_confidence,
+                    predicted_type=prediction.label.value,
+                    confidence=prediction.confidence,
+                    top_predictions=[
+                        ProductionPageClassScore(
+                            label=item.label.value,
+                            confidence=item.confidence,
+                        )
+                        for item in prediction.top_predictions
+                    ],
+                    is_extraction_target=prediction.label.value in target_types,
+                )
+                for page, prediction in zip(prepared_pages, predictions, strict=True)
+            ]
+
+        total_ms = (time.perf_counter() - total_started) * 1000
+        return ProductionPageClassificationResponse(
+            filename=filename,
+            sha256=sha256,
+            page_count=len(rendered),
+            target_page_types=self.settings.production_ocr_page_type_list,
+            pages=pages,
+            timings=ProductionPageClassificationTiming(
+                render_ms=round(render_ms, 3),
+                orientation_ms=round(orientation_ms, 3),
+                classification_ms=round(classification_ms, 3),
+                total_ms=round(total_ms, 3),
+            ),
+        )
 
     def _reconstruct_locked(
         self,
@@ -217,18 +360,41 @@ class ProductionOcrService:
         render_started = time.perf_counter()
         rendered = self.renderer.render(pdf_path)
         render_ms = (time.perf_counter() - render_started) * 1000
+        LOGGER.info(
+            "OCR stage render filename=%r pages=%d elapsed_ms=%.1f",
+            filename,
+            len(rendered),
+            render_ms,
+        )
 
         with tempfile.TemporaryDirectory(prefix="production-ocr-") as temp_dir:
             root = Path(temp_dir)
             orientation_started = time.perf_counter()
             prepared_pages = self._orient_pages(rendered, root)
             orientation_ms = (time.perf_counter() - orientation_started) * 1000
+            LOGGER.info(
+                "OCR stage orientation filename=%r pages=%d elapsed_ms=%.1f rotations=%s",
+                filename,
+                len(prepared_pages),
+                orientation_ms,
+                [page.rotation_angle for page in prepared_pages],
+            )
 
             classification_started = time.perf_counter()
             predictions = self._classifier.predict_bytes(
                 [page.image_bytes for page in prepared_pages], top_k=1
             )
             classification_ms = (time.perf_counter() - classification_started) * 1000
+            LOGGER.info(
+                "OCR stage classification filename=%r pages=%d elapsed_ms=%.1f predictions=%s",
+                filename,
+                len(predictions),
+                classification_ms,
+                [
+                    f"p{page.page_number}:{prediction.label.value}:{prediction.confidence:.3f}"
+                    for page, prediction in zip(prepared_pages, predictions, strict=True)
+                ],
+            )
 
             ocr_started = time.perf_counter()
             ocr_pages: list[_OcrPage] = []
@@ -245,6 +411,23 @@ class ProductionOcrService:
                     page_ocr_ms = (time.perf_counter() - page_ocr_started) * 1000
                     ocr_pages.append(
                         _OcrPage(prepared=page, page_type=page_type, tokens=tokens)
+                    )
+                    LOGGER.info(
+                        "OCR stage page filename=%r page=%d type=%s target=true "
+                        "tokens=%d elapsed_ms=%.1f",
+                        filename,
+                        page.page_number,
+                        page_type,
+                        len(tokens),
+                        page_ocr_ms,
+                    )
+                else:
+                    LOGGER.info(
+                        "OCR stage page filename=%r page=%d type=%s target=false "
+                        "tokens=0 elapsed_ms=0",
+                        filename,
+                        page.page_number,
+                        page_type,
                     )
                 if prediction.confidence < self.settings.low_confidence_threshold:
                     warnings.append(
@@ -265,6 +448,12 @@ class ProductionOcrService:
                     )
                 )
             ocr_ms = (time.perf_counter() - ocr_started) * 1000
+            LOGGER.info(
+                "OCR stage recognition filename=%r target_pages=%d elapsed_ms=%.1f",
+                filename,
+                len(ocr_pages),
+                ocr_ms,
+            )
             if not ocr_pages:
                 raise ProductionExtractionError(
                     "No page was classified as an OCR/extraction target."
@@ -296,6 +485,12 @@ class ProductionOcrService:
                 tolerance_ratio=self.settings.text_reconstruction_line_tolerance,
             )
             reconstruction_ms = (time.perf_counter() - reconstruction_started) * 1000
+            LOGGER.info(
+                "OCR stage reconstruction filename=%r chars=%d elapsed_ms=%.1f",
+                filename,
+                len(reconstructed_text),
+                reconstruction_ms,
+            )
             for result in reconstruction_results:
                 warnings.extend(result.warnings)
 

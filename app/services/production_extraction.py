@@ -18,6 +18,7 @@ from app.schemas.production_extraction import (
     ProductionExtractionResponse,
     ProductionModelStatus,
     ProductionOcrResponse,
+    ProductionPageClassificationResponse,
     ProductionPageResult,
     ProductionReadinessResponse,
     ProductionTiming,
@@ -440,20 +441,28 @@ class ProductionExtractionService:
         finally:
             self._lock.release()
 
-    def _extract_split_locked(
+    def preview_page_classifications(
         self,
         *,
         pdf_path: Path,
         filename: str,
         sha256: str,
-    ) -> ProductionExtractionResponse:
-        if self._http_client is None or self._student is None:
-            raise ProductionExtractionError("Split production runtime is not initialized.")
-        total_started = time.perf_counter()
+    ) -> ProductionPageClassificationResponse:
+        if not self._ready:
+            raise ProductionExtractionError(
+                self._error or "Production extraction models are not loaded yet."
+            )
+        if not self.settings.production_split_runtime:
+            raise ProductionExtractionError(
+                "Page classification preview requires the split OCR runtime."
+            )
+        if self._http_client is None:
+            raise ProductionExtractionError("OCR HTTP client has not been initialized.")
+
         try:
             with pdf_path.open("rb") as source:
                 response = self._http_client.post(
-                    f"{self.settings.production_ocr_service_base_url}/reconstruct",
+                    f"{self.settings.production_ocr_service_base_url}/page-classifications",
                     files={"file": (filename, source, "application/pdf")},
                 )
         except httpx.HTTPError as exc:
@@ -472,6 +481,72 @@ class ProductionExtractionService:
                 f"{detail or 'unknown error'}"
             )
         try:
+            result = ProductionPageClassificationResponse.model_validate(response.json())
+        except (TypeError, ValueError) as exc:
+            raise ProductionExtractionError(
+                f"OCR service returned an invalid classification response: {exc}"
+            ) from exc
+        if result.sha256 != sha256:
+            raise ProductionExtractionError(
+                "OCR service response SHA-256 does not match the uploaded PDF."
+            )
+        return result
+
+    def _extract_split_locked(
+        self,
+        *,
+        pdf_path: Path,
+        filename: str,
+        sha256: str,
+    ) -> ProductionExtractionResponse:
+        if self._http_client is None or self._student is None:
+            raise ProductionExtractionError("Split production runtime is not initialized.")
+        total_started = time.perf_counter()
+        request_id = str(uuid4())
+        LOGGER.info(
+            "Extraction pipeline started request_id=%s filename=%r sha256=%s",
+            request_id,
+            filename,
+            sha256[:12],
+        )
+        ocr_request_started = time.perf_counter()
+        try:
+            with pdf_path.open("rb") as source:
+                response = self._http_client.post(
+                    f"{self.settings.production_ocr_service_base_url}/reconstruct",
+                    files={"file": (filename, source, "application/pdf")},
+                )
+        except httpx.HTTPError as exc:
+            LOGGER.exception(
+                "Extraction OCR request failed request_id=%s filename=%r",
+                request_id,
+                filename,
+            )
+            raise ProductionExtractionError(f"OCR service request failed: {exc}") from exc
+        ocr_round_trip_ms = (time.perf_counter() - ocr_request_started) * 1000
+        if response.status_code == 429:
+            raise ProductionExtractionError(
+                "The OCR GPU worker is busy. Retry this request shortly."
+            )
+        if response.is_error:
+            try:
+                detail = response.json().get("detail")
+            except (TypeError, ValueError):
+                detail = response.text
+            LOGGER.error(
+                "Extraction OCR response failed request_id=%s filename=%r status=%d "
+                "round_trip_ms=%.1f detail=%s",
+                request_id,
+                filename,
+                response.status_code,
+                ocr_round_trip_ms,
+                detail,
+            )
+            raise ProductionExtractionError(
+                f"OCR service returned HTTP {response.status_code}: "
+                f"{detail or 'unknown error'}"
+            )
+        try:
             ocr_result = ProductionOcrResponse.model_validate(response.json())
         except (TypeError, ValueError) as exc:
             raise ProductionExtractionError(
@@ -482,9 +557,26 @@ class ProductionExtractionService:
                 "OCR service response SHA-256 does not match the uploaded PDF."
             )
 
-        request_id = str(uuid4())
-        compact_output, _generated_tokens, extraction_ms = self._student.generate(
+        LOGGER.info(
+            "Extraction OCR completed request_id=%s filename=%r pages=%d chars=%d "
+            "round_trip_ms=%.1f internal_total_ms=%.1f",
+            request_id,
+            filename,
+            ocr_result.page_count,
+            len(ocr_result.reconstructed_text),
+            ocr_round_trip_ms,
+            ocr_result.timings.total_ms,
+        )
+        compact_output, generated_tokens, extraction_ms = self._student.generate(
             ocr_result.reconstructed_text
+        )
+        LOGGER.info(
+            "Extraction student completed request_id=%s filename=%r generated_tokens=%d "
+            "elapsed_ms=%.1f",
+            request_id,
+            filename,
+            generated_tokens,
+            extraction_ms,
         )
         extraction = student_target_to_compact_document(
             compact_output,
@@ -492,6 +584,14 @@ class ProductionExtractionService:
             document_id=request_id,
         )
         total_ms = (time.perf_counter() - total_started) * 1000
+        LOGGER.info(
+            "Extraction pipeline completed request_id=%s filename=%r applicants=%d "
+            "total_ms=%.1f",
+            request_id,
+            filename,
+            len(extraction.applicants),
+            total_ms,
+        )
         return ProductionExtractionResponse(
             request_id=request_id,
             filename=filename,

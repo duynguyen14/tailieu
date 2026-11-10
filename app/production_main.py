@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.production_classification_routes import router as production_classification_router
 from app.api.production_extraction_routes import router as production_extraction_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
@@ -54,6 +55,7 @@ def create_production_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.production_extraction_service = service
+    app.include_router(production_classification_router, prefix=settings.api_prefix)
     app.include_router(production_extraction_router, prefix=settings.api_prefix)
     return app
 
