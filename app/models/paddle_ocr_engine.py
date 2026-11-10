@@ -190,7 +190,15 @@ class PaddleOcrEngine:
     def predict(self, image_path: Path) -> list[OcrTokenPrediction]:
         if not image_path.is_file():
             raise FileNotFoundError(f"OCR page image does not exist: {image_path}")
-        output = self._pipeline.predict(str(image_path))
+        return self._predict_raw(str(image_path))
+
+    def predict_image(self, image: Any) -> list[OcrTokenPrediction]:
+        from app.models.ocr_preprocessing import rgb_to_bgr_array
+
+        return self._predict_raw(rgb_to_bgr_array(image))
+
+    def _predict_raw(self, raw_input: Any) -> list[OcrTokenPrediction]:
+        output = self._pipeline.predict(raw_input)
         try:
             result = next(iter(output))
         except StopIteration as exc:

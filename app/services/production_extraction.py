@@ -45,6 +45,9 @@ from app.services.text_reconstruction import (
 LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from PIL import Image
+
+    from app.models.ocr_preprocessing import ContentDetection
     from app.models.onnx_page_classifier import OnnxPageClassifier
     from app.models.paddle_ocr_engine import OcrTokenPrediction, PaddleOcrEngine
     from app.models.paddle_orientation import PaddleOrientationClassifier
@@ -53,12 +56,16 @@ if TYPE_CHECKING:
 @dataclass
 class _PreparedPage:
     page_number: int
-    path: Path
-    image_bytes: bytes
+    image: Image.Image
+    image_bytes: bytes | None
     width: int
     height: int
     rotation_angle: int
     orientation_confidence: float
+    content_detection: ContentDetection | None = None
+
+    def close(self) -> None:
+        self.image.close()
 
 
 @dataclass
@@ -98,14 +105,29 @@ class _StudentRuntime:
         load_kwargs: dict[str, Any] = {"local_files_only": True}
         major = int(str(transformers.__version__).split(".", maxsplit=1)[0])
         load_kwargs["dtype" if major >= 5 else "torch_dtype"] = dtype
+        attn_impl = "sdpa"
+        if self.device.startswith("cuda"):
+            try:
+                import flash_attn  # noqa: F401
+
+                attn_impl = "flash_attention_2"
+            except ImportError:
+                attn_impl = "sdpa"
         try:
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_dir,
-                attn_implementation="sdpa",
+                attn_implementation=attn_impl,
                 **load_kwargs,
             )
-        except TypeError:
-            self.model = AutoModelForCausalLM.from_pretrained(model_dir, **load_kwargs)
+        except (TypeError, ValueError, ImportError):
+            try:
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    model_dir,
+                    attn_implementation="sdpa",
+                    **load_kwargs,
+                )
+            except TypeError:
+                self.model = AutoModelForCausalLM.from_pretrained(model_dir, **load_kwargs)
         self.model.to(self.device)
         self.model.eval()
         self.model.config.use_cache = True
@@ -113,9 +135,42 @@ class _StudentRuntime:
             self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
         if self.device.startswith("cuda"):
             torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            torch.backends.cudnn.benchmark = True
+            if hasattr(torch, "set_float32_matmul_precision"):
+                torch.set_float32_matmul_precision("high")
         self.stop_token_ids = generation_stop_token_ids(self.tokenizer, self.model)
         self.max_input_tokens = settings.production_student_max_input_tokens
         self.max_new_tokens = settings.production_student_max_new_tokens
+        self.cache_implementation = (
+            settings.production_student_cache_implementation
+            if self.device.startswith("cuda")
+            else "dynamic"
+        )
+        self.compiled = False
+        if (
+            self.device.startswith("cuda")
+            and settings.production_student_torch_compile
+            and hasattr(torch, "compile")
+        ):
+            try:
+                self.model.forward = torch.compile(
+                    self.model.forward,
+                    mode=settings.production_student_torch_compile_mode,
+                    fullgraph=False,
+                )
+                self.compiled = True
+                LOGGER.info(
+                    "Enabled torch.compile for student runtime; mode=%s cache=%s",
+                    settings.production_student_torch_compile_mode,
+                    self.cache_implementation,
+                )
+            except Exception as exc:
+                LOGGER.warning(
+                    "Could not enable torch.compile for student runtime, using eager mode: %s",
+                    exc,
+                )
+                self.cache_implementation = "dynamic"
 
     def _resolve_device(self, settings: Settings) -> str:
         torch = self.torch
@@ -152,10 +207,11 @@ class _StudentRuntime:
         }
 
     def warmup(self) -> None:
-        # The warm-up intentionally generates one token.  It initializes CUDA,
-        # attention kernels and the KV cache without spending seconds on a fake
-        # full extraction.
-        self.generate("Warm-up only.", max_new_tokens=1, validate=False)
+        # Generate a few tokens during warm-up so both prefill (prompt) and
+        # decode (1-token autoregressive step) CUDA graphs are compiled before
+        # readiness becomes true.
+        warmup_tokens = 4 if self.compiled else 1
+        self.generate("Warm-up only.", max_new_tokens=warmup_tokens, validate=False)
 
     def generate(
         self,
@@ -181,15 +237,28 @@ class _StudentRuntime:
         if self.device.startswith("cuda"):
             self.torch.cuda.synchronize(self.device)
         started = time.perf_counter()
+        gen_kwargs: dict[str, Any] = {
+            "max_new_tokens": max_new_tokens or self.max_new_tokens,
+            "do_sample": False,
+            "use_cache": True,
+            "pad_token_id": self.tokenizer.pad_token_id,
+            "eos_token_id": self.stop_token_ids,
+        }
+        if self.cache_implementation == "static":
+            gen_kwargs["cache_implementation"] = "static"
         with self.torch.inference_mode():
-            generated = self.model.generate(
-                **encoded,
-                max_new_tokens=max_new_tokens or self.max_new_tokens,
-                do_sample=False,
-                use_cache=True,
-                pad_token_id=self.tokenizer.pad_token_id,
-                eos_token_id=self.stop_token_ids,
-            )
+            try:
+                generated = self.model.generate(**encoded, **gen_kwargs)
+            except (TypeError, ValueError, RuntimeError) as exc:
+                if "cache_implementation" not in gen_kwargs:
+                    raise
+                LOGGER.warning(
+                    "Static KV cache generation failed (%s); falling back to dynamic cache.",
+                    exc,
+                )
+                self.cache_implementation = "dynamic"
+                gen_kwargs.pop("cache_implementation", None)
+                generated = self.model.generate(**encoded, **gen_kwargs)
         if self.device.startswith("cuda"):
             self.torch.cuda.synchronize(self.device)
         latency_ms = (time.perf_counter() - started) * 1000
@@ -348,14 +417,12 @@ class ProductionExtractionService:
         assert self._orientation is not None
         assert self._ocr is not None
         assert self._student is not None
-        with tempfile.TemporaryDirectory(prefix="production-warmup-") as temp_dir:
-            path = Path(temp_dir) / "warmup.png"
-            image = Image.new("RGB", (640, 640), "white")
-            image.save(path, format="PNG")
-            image_bytes = path.read_bytes()
-            self._classifier.predict_bytes([image_bytes], top_k=1)
-            self._orientation.predict(path)
-            self._ocr.predict(path)
+        image = Image.new("RGB", (640, 640), "white")
+        try:
+            self._classifier.predict_images([image], top_k=1)
+            self._orientation.predict_image(image)
+            self._ocr.predict_image(image)
+        finally:
             image.close()
         self._student.warmup()
 
@@ -636,25 +703,15 @@ class ProductionExtractionService:
         rendered = self.renderer.render(pdf_path)
         render_ms = (time.perf_counter() - render_started) * 1000
 
-        with tempfile.TemporaryDirectory(prefix="production-extraction-") as temp_dir:
-            root = Path(temp_dir)
+        prepared_pages: list[_PreparedPage] = []
+        try:
             orientation_started = time.perf_counter()
-            prepared_pages = self._orient_pages(rendered, root)
+            prepared_pages = self._orient_pages(rendered)
             orientation_ms = (time.perf_counter() - orientation_started) * 1000
 
             classification_started = time.perf_counter()
-            classifier_pages = [
-                RenderedPage(
-                    page_index=page.page_number - 1,
-                    page_number=page.page_number,
-                    width=page.width,
-                    height=page.height,
-                    image_bytes=page.image_bytes,
-                )
-                for page in prepared_pages
-            ]
-            predictions = self._classifier.predict_bytes(
-                [page.image_bytes for page in classifier_pages], top_k=1
+            predictions = self._classifier.predict_images(
+                [page.image for page in prepared_pages], top_k=1
             )
             classification_ms = (time.perf_counter() - classification_started) * 1000
 
@@ -669,7 +726,7 @@ class ProductionExtractionService:
                 page_ocr_ms = 0.0
                 if use_page:
                     page_ocr_started = time.perf_counter()
-                    tokens = self._recognize_page(page.path, root / f"ocr-{page.page_number}")
+                    tokens = self._recognize_page(page)
                     page_ocr_ms = (time.perf_counter() - page_ocr_started) * 1000
                     ocr_pages.append(
                         _OcrPage(
@@ -741,6 +798,9 @@ class ProductionExtractionService:
                 case_id=request_id,
                 document_id=request_id,
             )
+        finally:
+            for page in prepared_pages:
+                page.close()
 
         total_ms = (time.perf_counter() - total_started) * 1000
         return ProductionExtractionResponse(
@@ -769,21 +829,18 @@ class ProductionExtractionService:
         )
 
     def _orient_pages(
-        self, pages: list[RenderedPage], root: Path
+        self, pages: list[RenderedPage]
     ) -> list[_PreparedPage]:
         from app.models.ocr_preprocessing import (
-            load_rgb_image,
+            load_rgb_bytes,
             orientation_probe,
-            png_bytes,
         )
 
         assert self._orientation is not None
         output: list[_PreparedPage] = []
         for page in pages:
-            source_path = root / f"source-{page.page_number}.png"
-            source_path.write_bytes(page.image_bytes)
-            source = load_rgb_image(source_path)
-            probe, _detection = orientation_probe(
+            source = load_rgb_bytes(page.image_bytes)
+            probe, detection = orientation_probe(
                 source,
                 thumbnail_max_side=self.settings.ocr_content_thumbnail_max_side,
                 padding_ratio=self.settings.ocr_content_padding_ratio,
@@ -793,43 +850,37 @@ class ProductionExtractionService:
             )
             prediction = self._orientation.predict_image(probe)
             probe.close()
-            rotated = (
-                source.rotate(prediction.angle, expand=True, fillcolor="white")
-                if prediction.angle
-                else source.copy()
-            )
-            path = root / f"oriented-{page.page_number}.png"
-            image_bytes = png_bytes(rotated)
-            path.write_bytes(image_bytes)
+            if prediction.angle:
+                rotated = source.rotate(prediction.angle, expand=True, fillcolor="white")
+                source.close()
+                cached_detection = None
+            else:
+                rotated = source
+                cached_detection = detection
             width, height = rotated.size
-            rotated.close()
-            source.close()
             output.append(
                 _PreparedPage(
                     page_number=page.page_number,
-                    path=path,
-                    image_bytes=image_bytes,
+                    image=rotated,
+                    image_bytes=None,
                     width=width,
                     height=height,
                     rotation_angle=prediction.angle,
                     orientation_confidence=prediction.confidence,
+                    content_detection=cached_detection,
                 )
             )
         return output
 
-    def _recognize_page(self, image_path: Path, temp_root: Path) -> list[OcrTokenPrediction]:
+    def _recognize_page(self, page: _PreparedPage) -> list[OcrTokenPrediction]:
         from app.models.ocr_preprocessing import (
-            load_rgb_image,
             ocr_quality_score,
-            png_bytes,
             prepare_ocr_image,
             recommended_upscale,
         )
         from app.models.ocr_region_refinement import refine_ocr_tokens
 
         assert self._ocr is not None
-        temp_root.mkdir(parents=True, exist_ok=True)
-        source = load_rgb_image(image_path)
         prepare_kwargs = {
             "rotation": 0,
             "enable_content_crop": self.settings.ocr_enable_content_crop,
@@ -839,23 +890,20 @@ class ProductionExtractionService:
             "min_content_area_ratio": self.settings.ocr_content_min_area_ratio,
             "max_crop_area_ratio": self.settings.ocr_content_max_crop_area_ratio,
             "max_processed_side": self.settings.ocr_upscale_max_processed_side,
+            "precomputed_detection": page.content_detection,
         }
-        selected = prepare_ocr_image(source, scale=1.0, **prepare_kwargs)
-        selected_path = temp_root / "base.png"
-        selected_path.write_bytes(png_bytes(selected.image))
-        tokens = self._ocr.predict(selected_path)
+        selected = prepare_ocr_image(page.image, scale=1.0, **prepare_kwargs)
+        tokens = self._ocr.predict_image(selected.image)
         selected_score = ocr_quality_score(tokens)
-        if self.settings.ocr_enable_small_text_upscale:
+        if self.settings.production_ocr_enable_small_text_upscale:
             scale = recommended_upscale(
                 tokens,
                 target_text_height=self.settings.ocr_upscale_target_text_height,
                 max_factor=self.settings.ocr_upscale_max_factor,
             )
             if scale > 1.05:
-                upscaled = prepare_ocr_image(source, scale=scale, **prepare_kwargs)
-                upscaled_path = temp_root / "upscaled.png"
-                upscaled_path.write_bytes(png_bytes(upscaled.image))
-                upscaled_tokens = self._ocr.predict(upscaled_path)
+                upscaled = prepare_ocr_image(page.image, scale=scale, **prepare_kwargs)
+                upscaled_tokens = self._ocr.predict_image(upscaled.image)
                 if ocr_quality_score(upscaled_tokens) >= selected_score - 0.05:
                     selected.image.close()
                     selected = upscaled
@@ -863,27 +911,27 @@ class ProductionExtractionService:
                 else:
                     upscaled.image.close()
         if self.settings.production_ocr_enable_refinement and tokens:
-            refinement = refine_ocr_tokens(
-                selected.image,
-                tokens,
-                temp_dir=temp_root / "refinement",
-                predict_many=self._ocr.predict_refinement_many,
-                scales=self.settings.ocr_refinement_scale_list,
-                confidence_threshold=self.settings.ocr_refinement_confidence_threshold,
-                candidate_min_confidence=(
-                    self.settings.ocr_refinement_candidate_min_confidence
-                ),
-                agreement_similarity=self.settings.ocr_refinement_agreement_similarity,
-                min_confidence_gain=self.settings.ocr_refinement_min_confidence_gain,
-                max_regions=self.settings.ocr_refinement_max_regions,
-                max_seconds=self.settings.ocr_refinement_max_seconds,
-                padding_ratio=self.settings.ocr_refinement_padding_ratio,
-                max_crop_side=self.settings.ocr_refinement_max_crop_side,
-                protect_digits=self.settings.ocr_refinement_protect_digits,
-                version=self.settings.ocr_refinement_version,
-            )
-            tokens = refinement.tokens
+            with tempfile.TemporaryDirectory(prefix="production-extract-refine-") as refine_dir:
+                refinement = refine_ocr_tokens(
+                    selected.image,
+                    tokens,
+                    temp_dir=Path(refine_dir),
+                    predict_many=self._ocr.predict_refinement_many,
+                    scales=self.settings.ocr_refinement_scale_list,
+                    confidence_threshold=self.settings.ocr_refinement_confidence_threshold,
+                    candidate_min_confidence=(
+                        self.settings.ocr_refinement_candidate_min_confidence
+                    ),
+                    agreement_similarity=self.settings.ocr_refinement_agreement_similarity,
+                    min_confidence_gain=self.settings.ocr_refinement_min_confidence_gain,
+                    max_regions=self.settings.ocr_refinement_max_regions,
+                    max_seconds=self.settings.ocr_refinement_max_seconds,
+                    padding_ratio=self.settings.ocr_refinement_padding_ratio,
+                    max_crop_side=self.settings.ocr_refinement_max_crop_side,
+                    protect_digits=self.settings.ocr_refinement_protect_digits,
+                    version=self.settings.ocr_refinement_version,
+                )
+                tokens = refinement.tokens
         selected.image.close()
-        source.close()
         return tokens
 

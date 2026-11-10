@@ -53,7 +53,7 @@ class PdfRenderer:
                         page_number=page_index + 1,
                         width=pixmap.width,
                         height=pixmap.height,
-                        image_bytes=pixmap.tobytes("png"),
+                        image_bytes=pixmap.pil_tobytes(format="PNG", compress_level=1),
                     )
                 )
             return pages

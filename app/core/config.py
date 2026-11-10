@@ -235,9 +235,13 @@ class Settings(BaseSettings):
     production_student_precision: str = "bf16"
     production_student_max_input_tokens: int = Field(default=4096, ge=256, le=32768)
     production_student_max_new_tokens: int = Field(default=1024, ge=32, le=4096)
+    production_student_torch_compile: bool = True
+    production_student_torch_compile_mode: str = "reduce-overhead"
+    production_student_cache_implementation: str = "static"
     production_ocr_page_types: str = (
         "DIPLOMATIC_NOTE,APPLICANT_TABLE,APPLICANT_LIST"
     )
+    production_ocr_enable_small_text_upscale: bool = False
     production_ocr_enable_refinement: bool = False
     production_include_reconstructed_text: bool = False
 
@@ -273,6 +277,16 @@ class Settings(BaseSettings):
         if normalized not in {"auto", "bf16", "fp16", "fp32"}:
             raise ValueError(
                 "PRODUCTION_STUDENT_PRECISION must be auto, bf16, fp16, or fp32."
+            )
+        return normalized
+
+    @field_validator("production_student_cache_implementation")
+    @classmethod
+    def validate_production_student_cache_implementation(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"dynamic", "static"}:
+            raise ValueError(
+                "PRODUCTION_STUDENT_CACHE_IMPLEMENTATION must be dynamic or static."
             )
         return normalized
 

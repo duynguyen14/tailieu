@@ -85,12 +85,18 @@ class PaddleOrientationClassifier:
         """Classify an in-memory RGB image used as a content-focused probe."""
 
         try:
-            with TemporaryDirectory(prefix="orientation-probe-") as temp_dir:
-                probe_path = Path(temp_dir) / "probe.png"
-                image.convert("RGB").save(probe_path, format="PNG", optimize=True)
-                return self._predict_input(str(probe_path))
-        except Exception as exc:
-            raise RuntimeError(f"Could not prepare orientation probe image: {exc}") from exc
+            from app.models.ocr_preprocessing import rgb_to_bgr_array
+
+            bgr = rgb_to_bgr_array(image)
+            return self._predict_input(bgr)
+        except Exception:
+            try:
+                with TemporaryDirectory(prefix="orientation-probe-") as temp_dir:
+                    probe_path = Path(temp_dir) / "probe.png"
+                    image.convert("RGB").save(probe_path, format="PNG", compress_level=1)
+                    return self._predict_input(str(probe_path))
+            except Exception as exc:
+                raise RuntimeError(f"Could not prepare orientation probe image: {exc}") from exc
 
     def _predict_input(self, value: Any) -> OrientationPrediction:
         output = self._model.predict(input=value, batch_size=1)
@@ -129,6 +135,6 @@ def normalized_png(
         if prediction.angle:
             image = image.rotate(prediction.angle, expand=True, fillcolor="white")
         buffer = BytesIO()
-        image.save(buffer, format="PNG", optimize=True)
+        image.save(buffer, format="PNG", compress_level=1)
         width, height = image.size
     return buffer.getvalue(), width, height

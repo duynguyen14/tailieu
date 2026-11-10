@@ -102,6 +102,12 @@ class OnnxPageClassifier(PageClassifier):
         tensors = [self._preprocess_bytes(data) for data in images]
         return self._predict_tensors(tensors, top_k=top_k)
 
+    def predict_images(
+        self, images: Sequence[Image.Image], *, top_k: int = 3
+    ) -> list[DetailedPagePrediction]:
+        tensors = [self._preprocess_image(image.convert("RGB")) for image in images]
+        return self._predict_tensors(tensors, top_k=top_k)
+
     def _preprocess_path(self, path: Path) -> np.ndarray:
         if not path.is_file():
             raise FileNotFoundError(f"Classifier input image was not found: {path}")

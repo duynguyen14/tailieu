@@ -33,6 +33,9 @@ from app.services.text_reconstruction import (
 LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from PIL import Image
+
+    from app.models.ocr_preprocessing import ContentDetection
     from app.models.onnx_page_classifier import OnnxPageClassifier
     from app.models.paddle_ocr_engine import OcrTokenPrediction, PaddleOcrEngine
     from app.models.paddle_orientation import PaddleOrientationClassifier
@@ -41,12 +44,16 @@ if TYPE_CHECKING:
 @dataclass
 class _PreparedPage:
     page_number: int
-    path: Path
-    image_bytes: bytes
+    image: Image.Image
+    image_bytes: bytes | None
     width: int
     height: int
     rotation_angle: int
     orientation_confidence: float
+    content_detection: ContentDetection | None = None
+
+    def close(self) -> None:
+        self.image.close()
 
 
 @dataclass
@@ -160,13 +167,12 @@ class ProductionOcrService:
         assert self._classifier is not None
         assert self._orientation is not None
         assert self._ocr is not None
-        with tempfile.TemporaryDirectory(prefix="production-ocr-warmup-") as temp_dir:
-            path = Path(temp_dir) / "warmup.png"
-            image = Image.new("RGB", (640, 640), "white")
-            image.save(path, format="PNG")
-            self._classifier.predict_bytes([path.read_bytes()], top_k=1)
-            self._orientation.predict(path)
-            self._ocr.predict(path)
+        image = Image.new("RGB", (640, 640), "white")
+        try:
+            self._classifier.predict_images([image], top_k=1)
+            self._orientation.predict_image(image)
+            self._ocr.predict_image(image)
+        finally:
             image.close()
 
     def readiness(self) -> ProductionReadinessResponse:
@@ -263,6 +269,8 @@ class ProductionOcrService:
         filename: str,
         sha256: str,
     ) -> ProductionPageClassificationResponse:
+        from app.models.ocr_preprocessing import png_bytes
+
         assert self._classifier is not None
         assert self._orientation is not None
         total_started = time.perf_counter()
@@ -277,10 +285,10 @@ class ProductionOcrService:
             render_ms,
         )
 
-        with tempfile.TemporaryDirectory(prefix="production-classification-") as temp_dir:
-            root = Path(temp_dir)
+        prepared_pages: list[_PreparedPage] = []
+        try:
             orientation_started = time.perf_counter()
-            prepared_pages = self._orient_pages(rendered, root)
+            prepared_pages = self._orient_pages(rendered, include_png_bytes=True)
             orientation_ms = (time.perf_counter() - orientation_started) * 1000
             LOGGER.info(
                 "OCR stage orientation filename=%r pages=%d elapsed_ms=%.1f rotations=%s",
@@ -291,8 +299,8 @@ class ProductionOcrService:
             )
 
             classification_started = time.perf_counter()
-            predictions = self._classifier.predict_bytes(
-                [page.image_bytes for page in prepared_pages], top_k=3
+            predictions = self._classifier.predict_images(
+                [page.image for page in prepared_pages], top_k=3
             )
             classification_ms = (time.perf_counter() - classification_started) * 1000
             LOGGER.info(
@@ -310,7 +318,9 @@ class ProductionOcrService:
             pages = [
                 ProductionPageClassificationPreview(
                     page_number=page.page_number,
-                    image_base64=base64.b64encode(page.image_bytes).decode("ascii"),
+                    image_base64=base64.b64encode(
+                        page.image_bytes or png_bytes(page.image)
+                    ).decode("ascii"),
                     width=page.width,
                     height=page.height,
                     rotation_angle=page.rotation_angle,
@@ -328,6 +338,9 @@ class ProductionOcrService:
                 )
                 for page, prediction in zip(prepared_pages, predictions, strict=True)
             ]
+        finally:
+            for page in prepared_pages:
+                page.close()
 
         total_ms = (time.perf_counter() - total_started) * 1000
         return ProductionPageClassificationResponse(
@@ -367,10 +380,10 @@ class ProductionOcrService:
             render_ms,
         )
 
-        with tempfile.TemporaryDirectory(prefix="production-ocr-") as temp_dir:
-            root = Path(temp_dir)
+        prepared_pages: list[_PreparedPage] = []
+        try:
             orientation_started = time.perf_counter()
-            prepared_pages = self._orient_pages(rendered, root)
+            prepared_pages = self._orient_pages(rendered, include_png_bytes=False)
             orientation_ms = (time.perf_counter() - orientation_started) * 1000
             LOGGER.info(
                 "OCR stage orientation filename=%r pages=%d elapsed_ms=%.1f rotations=%s",
@@ -381,8 +394,8 @@ class ProductionOcrService:
             )
 
             classification_started = time.perf_counter()
-            predictions = self._classifier.predict_bytes(
-                [page.image_bytes for page in prepared_pages], top_k=1
+            predictions = self._classifier.predict_images(
+                [page.image for page in prepared_pages], top_k=1
             )
             classification_ms = (time.perf_counter() - classification_started) * 1000
             LOGGER.info(
@@ -407,7 +420,7 @@ class ProductionOcrService:
                 page_ocr_ms = 0.0
                 if use_page:
                     page_ocr_started = time.perf_counter()
-                    tokens = self._recognize_page(page.path, root / f"ocr-{page.page_number}")
+                    tokens = self._recognize_page(page)
                     page_ocr_ms = (time.perf_counter() - page_ocr_started) * 1000
                     ocr_pages.append(
                         _OcrPage(prepared=page, page_type=page_type, tokens=tokens)
@@ -493,6 +506,9 @@ class ProductionOcrService:
             )
             for result in reconstruction_results:
                 warnings.extend(result.warnings)
+        finally:
+            for page in prepared_pages:
+                page.close()
 
         total_ms = (time.perf_counter() - total_started) * 1000
         return ProductionOcrResponse(
@@ -513,10 +529,13 @@ class ProductionOcrService:
         )
 
     def _orient_pages(
-        self, pages: list[RenderedPage], root: Path
+        self,
+        pages: list[RenderedPage],
+        *,
+        include_png_bytes: bool = False,
     ) -> list[_PreparedPage]:
         from app.models.ocr_preprocessing import (
-            load_rgb_image,
+            load_rgb_bytes,
             orientation_probe,
             png_bytes,
         )
@@ -524,10 +543,8 @@ class ProductionOcrService:
         assert self._orientation is not None
         output: list[_PreparedPage] = []
         for page in pages:
-            source_path = root / f"source-{page.page_number}.png"
-            source_path.write_bytes(page.image_bytes)
-            source = load_rgb_image(source_path)
-            probe, _detection = orientation_probe(
+            source = load_rgb_bytes(page.image_bytes)
+            probe, detection = orientation_probe(
                 source,
                 thumbnail_max_side=self.settings.ocr_content_thumbnail_max_side,
                 padding_ratio=self.settings.ocr_content_padding_ratio,
@@ -537,43 +554,39 @@ class ProductionOcrService:
             )
             prediction = self._orientation.predict_image(probe)
             probe.close()
-            rotated = (
-                source.rotate(prediction.angle, expand=True, fillcolor="white")
-                if prediction.angle
-                else source.copy()
-            )
-            path = root / f"oriented-{page.page_number}.png"
-            image_bytes = png_bytes(rotated)
-            path.write_bytes(image_bytes)
+            if prediction.angle:
+                rotated = source.rotate(prediction.angle, expand=True, fillcolor="white")
+                source.close()
+                encoded_bytes = png_bytes(rotated) if include_png_bytes else None
+                cached_detection = None
+            else:
+                rotated = source
+                encoded_bytes = page.image_bytes if include_png_bytes else None
+                cached_detection = detection
             width, height = rotated.size
-            rotated.close()
-            source.close()
             output.append(
                 _PreparedPage(
                     page_number=page.page_number,
-                    path=path,
-                    image_bytes=image_bytes,
+                    image=rotated,
+                    image_bytes=encoded_bytes,
                     width=width,
                     height=height,
                     rotation_angle=prediction.angle,
                     orientation_confidence=prediction.confidence,
+                    content_detection=cached_detection,
                 )
             )
         return output
 
-    def _recognize_page(self, image_path: Path, temp_root: Path) -> list[OcrTokenPrediction]:
+    def _recognize_page(self, page: _PreparedPage) -> list[OcrTokenPrediction]:
         from app.models.ocr_preprocessing import (
-            load_rgb_image,
             ocr_quality_score,
-            png_bytes,
             prepare_ocr_image,
             recommended_upscale,
         )
         from app.models.ocr_region_refinement import refine_ocr_tokens
 
         assert self._ocr is not None
-        temp_root.mkdir(parents=True, exist_ok=True)
-        source = load_rgb_image(image_path)
         prepare_kwargs = {
             "rotation": 0,
             "enable_content_crop": self.settings.ocr_enable_content_crop,
@@ -583,23 +596,20 @@ class ProductionOcrService:
             "min_content_area_ratio": self.settings.ocr_content_min_area_ratio,
             "max_crop_area_ratio": self.settings.ocr_content_max_crop_area_ratio,
             "max_processed_side": self.settings.ocr_upscale_max_processed_side,
+            "precomputed_detection": page.content_detection,
         }
-        selected = prepare_ocr_image(source, scale=1.0, **prepare_kwargs)
-        selected_path = temp_root / "base.png"
-        selected_path.write_bytes(png_bytes(selected.image))
-        tokens = self._ocr.predict(selected_path)
+        selected = prepare_ocr_image(page.image, scale=1.0, **prepare_kwargs)
+        tokens = self._ocr.predict_image(selected.image)
         selected_score = ocr_quality_score(tokens)
-        if self.settings.ocr_enable_small_text_upscale:
+        if self.settings.production_ocr_enable_small_text_upscale:
             scale = recommended_upscale(
                 tokens,
                 target_text_height=self.settings.ocr_upscale_target_text_height,
                 max_factor=self.settings.ocr_upscale_max_factor,
             )
             if scale > 1.05:
-                upscaled = prepare_ocr_image(source, scale=scale, **prepare_kwargs)
-                upscaled_path = temp_root / "upscaled.png"
-                upscaled_path.write_bytes(png_bytes(upscaled.image))
-                upscaled_tokens = self._ocr.predict(upscaled_path)
+                upscaled = prepare_ocr_image(page.image, scale=scale, **prepare_kwargs)
+                upscaled_tokens = self._ocr.predict_image(upscaled.image)
                 if ocr_quality_score(upscaled_tokens) >= selected_score - 0.05:
                     selected.image.close()
                     selected = upscaled
@@ -607,24 +617,24 @@ class ProductionOcrService:
                 else:
                     upscaled.image.close()
         if self.settings.production_ocr_enable_refinement and tokens:
-            refinement = refine_ocr_tokens(
-                selected.image,
-                tokens,
-                temp_dir=temp_root / "refinement",
-                predict_many=self._ocr.predict_refinement_many,
-                scales=self.settings.ocr_refinement_scale_list,
-                confidence_threshold=self.settings.ocr_refinement_confidence_threshold,
-                candidate_min_confidence=self.settings.ocr_refinement_candidate_min_confidence,
-                agreement_similarity=self.settings.ocr_refinement_agreement_similarity,
-                min_confidence_gain=self.settings.ocr_refinement_min_confidence_gain,
-                max_regions=self.settings.ocr_refinement_max_regions,
-                max_seconds=self.settings.ocr_refinement_max_seconds,
-                padding_ratio=self.settings.ocr_refinement_padding_ratio,
-                max_crop_side=self.settings.ocr_refinement_max_crop_side,
-                protect_digits=self.settings.ocr_refinement_protect_digits,
-                version=self.settings.ocr_refinement_version,
-            )
-            tokens = refinement.tokens
+            with tempfile.TemporaryDirectory(prefix="production-ocr-refine-") as refine_dir:
+                refinement = refine_ocr_tokens(
+                    selected.image,
+                    tokens,
+                    temp_dir=Path(refine_dir),
+                    predict_many=self._ocr.predict_refinement_many,
+                    scales=self.settings.ocr_refinement_scale_list,
+                    confidence_threshold=self.settings.ocr_refinement_confidence_threshold,
+                    candidate_min_confidence=self.settings.ocr_refinement_candidate_min_confidence,
+                    agreement_similarity=self.settings.ocr_refinement_agreement_similarity,
+                    min_confidence_gain=self.settings.ocr_refinement_min_confidence_gain,
+                    max_regions=self.settings.ocr_refinement_max_regions,
+                    max_seconds=self.settings.ocr_refinement_max_seconds,
+                    padding_ratio=self.settings.ocr_refinement_padding_ratio,
+                    max_crop_side=self.settings.ocr_refinement_max_crop_side,
+                    protect_digits=self.settings.ocr_refinement_protect_digits,
+                    version=self.settings.ocr_refinement_version,
+                )
+                tokens = refinement.tokens
         selected.image.close()
-        source.close()
         return tokens

@@ -310,7 +310,7 @@ def refine_ocr_tokens(
                 max_side=max_crop_side,
             )
             path = temp_dir / f"refine-{position:04d}-{scale:.3f}x.png"
-            crop.save(path, format="PNG", optimize=True)
+            crop.save(path, format="PNG", compress_level=1)
             crop.close()
             requests.append(_RegionRequest(position, scale, path))
 

@@ -58,6 +58,16 @@ def load_rgb_image(image_path: Path) -> Image.Image:
         return ImageOps.exif_transpose(source).convert("RGB")
 
 
+def load_rgb_bytes(image_bytes: bytes) -> Image.Image:
+    with Image.open(BytesIO(image_bytes)) as source:
+        return ImageOps.exif_transpose(source).convert("RGB")
+
+
+def rgb_to_bgr_array(image: Image.Image) -> np.ndarray:
+    rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
+    return np.ascontiguousarray(rgb[:, :, ::-1])
+
+
 def _odd(value: int) -> int:
     value = max(3, value)
     return value if value % 2 else value + 1
@@ -210,6 +220,7 @@ def prepare_ocr_image(
     max_crop_area_ratio: float,
     scale: float = 1.0,
     max_processed_side: int = 5000,
+    precomputed_detection: ContentDetection | None = None,
 ) -> PreparedOcrImage:
     if rotation not in {0, 90, 180, 270}:
         raise ValueError(f"Unsupported OCR rotation: {rotation}")
@@ -217,19 +228,22 @@ def prepare_ocr_image(
     rotated = (
         source.rotate(rotation, expand=True, fillcolor="white")
         if rotation
-        else source.copy()
+        else source
     )
     rotated_size = rotated.size
     detection = ContentDetection(None, 0, 0.0)
     if enable_content_crop:
-        detection = detect_content_bbox(
-            rotated,
-            thumbnail_max_side=thumbnail_max_side,
-            padding_ratio=padding_ratio,
-            min_components=min_components,
-            min_content_area_ratio=min_content_area_ratio,
-            max_crop_area_ratio=max_crop_area_ratio,
-        )
+        if precomputed_detection is not None and rotation == 0:
+            detection = precomputed_detection
+        else:
+            detection = detect_content_bbox(
+                rotated,
+                thumbnail_max_side=thumbnail_max_side,
+                padding_ratio=padding_ratio,
+                min_components=min_components,
+                min_content_area_ratio=min_content_area_ratio,
+                max_crop_area_ratio=max_crop_area_ratio,
+            )
     crop_box = detection.bbox or (0, 0, rotated.width, rotated.height)
     processed = rotated.crop(crop_box)
 
@@ -261,9 +275,9 @@ def prepare_ocr_image(
     )
 
 
-def png_bytes(image: Image.Image) -> bytes:
+def png_bytes(image: Image.Image, *, compress_level: int = 1) -> bytes:
     buffer = BytesIO()
-    image.save(buffer, format="PNG", optimize=True)
+    image.save(buffer, format="PNG", compress_level=compress_level)
     return buffer.getvalue()
 
 
