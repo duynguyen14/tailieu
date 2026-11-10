@@ -1,0 +1,7 @@
+# Private classification + Paddle OCR service. This environment must not
+# install Torch/Transformers; the student model runs in a separate process.
+-r requirements-ocr-gpu.txt
+
+# The 5.9 MB page classifier intentionally runs on CPU to avoid sharing CUDA
+# libraries with Paddle and to keep this environment free of Torch.
+onnxruntime>=1.20,<2.0

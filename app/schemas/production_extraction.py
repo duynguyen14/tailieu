@@ -45,6 +45,25 @@ class ProductionTiming(BaseModel):
     total_ms: float = Field(ge=0.0)
 
 
+class ProductionOcrTiming(BaseModel):
+    render_ms: float = Field(ge=0.0)
+    orientation_ms: float = Field(ge=0.0)
+    classification_ms: float = Field(ge=0.0)
+    ocr_ms: float = Field(ge=0.0)
+    reconstruction_ms: float = Field(ge=0.0)
+    total_ms: float = Field(ge=0.0)
+
+
+class ProductionOcrResponse(BaseModel):
+    filename: str
+    sha256: str
+    page_count: int = Field(ge=1)
+    reconstructed_text: str
+    pages: list[ProductionPageResult]
+    timings: ProductionOcrTiming
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ProductionExtractionResponse(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
 

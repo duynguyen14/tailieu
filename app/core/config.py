@@ -213,19 +213,28 @@ class Settings(BaseSettings):
     teacher_max_input_chars: int = Field(default=50_000, ge=1000, le=500_000)
 
     # Stateless production PDF -> validated business JSON endpoint.  The
-    # runtime is deliberately opt-in because enabling it reserves GPU memory
-    # for the classifier, orientation model, Paddle OCR and Gemma for the
-    # entire API process lifetime.
+    # runtime is deliberately opt-in because enabling it reserves GPU memory.
+    # Split mode keeps Paddle OCR and the Qwen/Gemma student in independent
+    # processes so their native CUDA/cuDNN packages cannot conflict.
     production_extraction_enabled: bool = False
+    # Split production keeps Paddle and Torch in independent processes because
+    # their binary wheels can require incompatible CUDA/cuDNN package versions.
+    production_split_runtime: bool = True
+    production_ocr_service_enabled: bool = False
+    production_ocr_service_url: str = "http://127.0.0.1:8001/internal/v1/ocr"
+    production_ocr_service_timeout_seconds: float = Field(
+        default=300.0, ge=1.0, le=3600.0
+    )
+    production_ocr_classifier_device: DevicePreference = DevicePreference.CPU
     production_warmup_models: bool = True
     production_require_gpu: bool = True
     production_gpu_device_id: int = Field(default=0, ge=0)
     production_student_model_dir: Path = Path(
-        "models/student_extractor/gemma3_270m_shortkey_v8/merged_model"
+        "output/student_extractor_qwen3_1_7b_augmented_v9/merged_model"
     )
     production_student_precision: str = "bf16"
     production_student_max_input_tokens: int = Field(default=4096, ge=256, le=32768)
-    production_student_max_new_tokens: int = Field(default=512, ge=32, le=4096)
+    production_student_max_new_tokens: int = Field(default=1024, ge=32, le=4096)
     production_ocr_page_types: str = (
         "DIPLOMATIC_NOTE,APPLICANT_TABLE,APPLICANT_LIST"
     )
@@ -382,6 +391,13 @@ class Settings(BaseSettings):
     @property
     def production_student_model_path(self) -> Path:
         return self.resolve_project_path(self.production_student_model_dir)
+
+    @property
+    def production_ocr_service_base_url(self) -> str:
+        base_url = self.production_ocr_service_url.strip().rstrip("/")
+        if not base_url.startswith(("http://", "https://")):
+            raise ValueError("PRODUCTION_OCR_SERVICE_URL must start with http:// or https://")
+        return base_url
 
     @property
     def production_ocr_page_type_list(self) -> list[str]:

@@ -10,11 +10,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+import httpx
+
 from app.core.config import DevicePreference, Settings
 from app.domain.types import RenderedPage
 from app.schemas.production_extraction import (
     ProductionExtractionResponse,
     ProductionModelStatus,
+    ProductionOcrResponse,
     ProductionPageResult,
     ProductionReadinessResponse,
     ProductionTiming,
@@ -221,6 +224,7 @@ class ProductionExtractionService:
         self._orientation: PaddleOrientationClassifier | None = None
         self._ocr: PaddleOcrEngine | None = None
         self._student: _StudentRuntime | None = None
+        self._http_client: httpx.Client | None = None
         self._models: list[ProductionModelStatus] = []
 
     def initialize(self) -> None:
@@ -229,6 +233,30 @@ class ProductionExtractionService:
         self._loading = True
         self._error = None
         try:
+            if self.settings.production_split_runtime:
+                self._student = _StudentRuntime(self.settings)
+                self._http_client = httpx.Client(
+                    timeout=self.settings.production_ocr_service_timeout_seconds
+                )
+                self._models = [
+                    ProductionModelStatus(
+                        name="student_extractor",
+                        loaded=True,
+                        device=self._student.device,
+                        model=str(self._student.model_dir),
+                        message="OCR is provided by the private OCR service.",
+                    )
+                ]
+                if self.settings.production_warmup_models:
+                    self._student.warmup()
+                self._ready = True
+                LOGGER.info(
+                    "Production student runtime is ready; device=%s ocr_service=%s",
+                    self._student.device,
+                    self.settings.production_ocr_service_base_url,
+                )
+                return
+
             from app.models.onnx_page_classifier import OnnxPageClassifier
             from app.models.paddle_ocr_engine import PaddleOcrEngine
             from app.models.paddle_orientation import PaddleOrientationClassifier
@@ -331,6 +359,33 @@ class ProductionExtractionService:
         self._student.warmup()
 
     def readiness(self) -> ProductionReadinessResponse:
+        if (
+            self.settings.production_extraction_enabled
+            and self.settings.production_split_runtime
+            and self._ready
+        ):
+            try:
+                remote = self._remote_ocr_readiness()
+            except (httpx.HTTPError, RuntimeError, TypeError, ValueError) as exc:
+                return ProductionReadinessResponse(
+                    enabled=True,
+                    ready=False,
+                    loading=self._loading,
+                    seal_detection_enabled=False,
+                    models=self._models,
+                    error=f"OCR service is unavailable: {exc}",
+                )
+            return ProductionReadinessResponse(
+                enabled=True,
+                ready=remote.ready,
+                loading=self._loading or remote.loading,
+                seal_detection_enabled=False,
+                models=[*remote.models, *self._models],
+                error=(
+                    remote.error
+                    or (None if remote.ready else "Private OCR service is not ready.")
+                ),
+            )
         return ProductionReadinessResponse(
             enabled=self.settings.production_extraction_enabled,
             ready=self._ready,
@@ -345,6 +400,19 @@ class ProductionExtractionService:
         # lets process shutdown release CUDA contexts without unsafe ad-hoc
         # destruction while another native finalizer may still be running.
         self._ready = False
+        if self._http_client is not None:
+            self._http_client.close()
+            self._http_client = None
+
+    def _remote_ocr_readiness(self) -> ProductionReadinessResponse:
+        if self._http_client is None:
+            raise RuntimeError("OCR HTTP client has not been initialized.")
+        response = self._http_client.get(
+            f"{self.settings.production_ocr_service_base_url}/readiness",
+            timeout=min(5.0, self.settings.production_ocr_service_timeout_seconds),
+        )
+        response.raise_for_status()
+        return ProductionReadinessResponse.model_validate(response.json())
 
     def extract(
         self,
@@ -362,9 +430,92 @@ class ProductionExtractionService:
                 "The GPU extraction worker is busy. Retry this request shortly."
             )
         try:
+            if self.settings.production_split_runtime:
+                return self._extract_split_locked(
+                    pdf_path=pdf_path,
+                    filename=filename,
+                    sha256=sha256,
+                )
             return self._extract_locked(pdf_path=pdf_path, filename=filename, sha256=sha256)
         finally:
             self._lock.release()
+
+    def _extract_split_locked(
+        self,
+        *,
+        pdf_path: Path,
+        filename: str,
+        sha256: str,
+    ) -> ProductionExtractionResponse:
+        if self._http_client is None or self._student is None:
+            raise ProductionExtractionError("Split production runtime is not initialized.")
+        total_started = time.perf_counter()
+        try:
+            with pdf_path.open("rb") as source:
+                response = self._http_client.post(
+                    f"{self.settings.production_ocr_service_base_url}/reconstruct",
+                    files={"file": (filename, source, "application/pdf")},
+                )
+        except httpx.HTTPError as exc:
+            raise ProductionExtractionError(f"OCR service request failed: {exc}") from exc
+        if response.status_code == 429:
+            raise ProductionExtractionError(
+                "The OCR GPU worker is busy. Retry this request shortly."
+            )
+        if response.is_error:
+            try:
+                detail = response.json().get("detail")
+            except (TypeError, ValueError):
+                detail = response.text
+            raise ProductionExtractionError(
+                f"OCR service returned HTTP {response.status_code}: "
+                f"{detail or 'unknown error'}"
+            )
+        try:
+            ocr_result = ProductionOcrResponse.model_validate(response.json())
+        except (TypeError, ValueError) as exc:
+            raise ProductionExtractionError(
+                f"OCR service returned an invalid response: {exc}"
+            ) from exc
+        if ocr_result.sha256 != sha256:
+            raise ProductionExtractionError(
+                "OCR service response SHA-256 does not match the uploaded PDF."
+            )
+
+        request_id = str(uuid4())
+        compact_output, _generated_tokens, extraction_ms = self._student.generate(
+            ocr_result.reconstructed_text
+        )
+        extraction = student_target_to_compact_document(
+            compact_output,
+            case_id=request_id,
+            document_id=request_id,
+        )
+        total_ms = (time.perf_counter() - total_started) * 1000
+        return ProductionExtractionResponse(
+            request_id=request_id,
+            filename=filename,
+            sha256=sha256,
+            page_count=ocr_result.page_count,
+            extraction=extraction,
+            compact_model_output=compact_output,
+            reconstructed_text=(
+                ocr_result.reconstructed_text
+                if self.settings.production_include_reconstructed_text
+                else None
+            ),
+            pages=ocr_result.pages,
+            timings=ProductionTiming(
+                render_ms=ocr_result.timings.render_ms,
+                orientation_ms=ocr_result.timings.orientation_ms,
+                classification_ms=ocr_result.timings.classification_ms,
+                ocr_ms=ocr_result.timings.ocr_ms,
+                reconstruction_ms=ocr_result.timings.reconstruction_ms,
+                extraction_ms=round(extraction_ms, 3),
+                total_ms=round(total_ms, 3),
+            ),
+            warnings=ocr_result.warnings,
+        )
 
     def _extract_locked(
         self,

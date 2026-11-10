@@ -1,95 +1,128 @@
-# Production PDF extraction API
+# Split production PDF extraction API
 
-The endpoint `POST /api/v1/document-extractions` accepts one scanned PDF and
-runs the complete synchronous pipeline:
+The public endpoint `POST /api/v1/document-extractions` accepts one scanned PDF
+and returns backend-validated business JSON. The public contract is unchanged,
+but production uses two localhost services so Paddle and Torch never share a
+Python environment or CUDA/cuDNN packages.
 
-1. render PDF pages;
-2. detect and normalize page orientation;
-3. classify every page with the exported ONNX document classifier;
-4. OCR configured business pages with the custom Paddle detection/recognition models;
-5. reconstruct page text deterministically from OCR text and bounding boxes;
-6. extract compact v8 fields with the merged Gemma model;
-7. validate and map the compact response to `CompactDocumentExtraction`.
-
-Seal detection is not part of this runtime. `PaddleLayoutDetector` is never
-loaded and OCR tokens are never removed because they overlap a seal.
-
-## Required model artifacts
-
-Export the trained page classifier checkpoint once:
-
-```bat
-python -m tools.export_classifier_onnx --checkpoint output\document_classifier_anotation_2_v3\best_model.pt
+```text
+Frontend
+   -> public student API :8000
+      -> private OCR API 127.0.0.1:8001
+         -> page classification (ONNX CPU)
+         -> orientation + OCR (Paddle GPU)
+         -> deterministic text reconstruction
+      <- reconstructed text + page diagnostics
+      -> Qwen/Gemma student (Torch GPU)
+      -> schema validation
+   <- validated JSON
 ```
 
-The production host must then contain:
+Seal detection is not loaded by either service.
+
+## Required model artifacts
 
 ```text
 models/page_classifier/model.onnx
 models/page_classifier/labels.json
-models/ocr/recognition/latin_ppocrv5_mobile_phase2_v2/inference/
-models/student_extractor/gemma3_270m_shortkey_v8/merged_model/
+output/ocr_recognition_latin_ppocrv5_mobile_phase3_v3/inference/
+output/student_extractor_qwen3_1_7b_augmented_v9/merged_model/
 ```
 
 ## Environment
 
-Use the relevant values below in `.env` (adjust paths and GPU ID if needed):
+Both processes read the same `.env`. A recommended three-GPU host assignment is
+Qwen on physical GPU 2, Paddle on physical GPU 3, and the small ONNX classifier
+on CPU:
 
 ```dotenv
 PAGE_CLASSIFIER_MODEL_PATH=models/page_classifier/model.onnx
 PAGE_CLASSIFIER_LABELS_PATH=models/page_classifier/labels.json
 
 OCR_RUNTIME_DEVICE=cuda
-OCR_RUNTIME_GPU_DEVICE_ID=0
+OCR_RUNTIME_GPU_DEVICE_ID=3
 OCR_RUNTIME_ALLOW_CPU_FALLBACK=false
 OCR_DETECTION_MODEL_NAME=PP-OCRv6_medium_det
-OCR_RECOGNITION_MODEL_NAME=latin_PP-OCRv5_mobile_rec
 OCR_DETECTION_MODEL_DIR=
-OCR_RECOGNITION_MODEL_DIR=models/ocr/recognition/latin_ppocrv5_mobile_phase2_v2/inference
+OCR_RECOGNITION_MODEL_NAME=latin_PP-OCRv5_mobile_rec
+OCR_RECOGNITION_MODEL_DIR=output/ocr_recognition_latin_ppocrv5_mobile_phase3_v3/inference
 
 PRODUCTION_EXTRACTION_ENABLED=true
+PRODUCTION_SPLIT_RUNTIME=true
+PRODUCTION_OCR_SERVICE_ENABLED=true
+PRODUCTION_OCR_SERVICE_URL=http://127.0.0.1:8001/internal/v1/ocr
+PRODUCTION_OCR_SERVICE_TIMEOUT_SECONDS=300
+PRODUCTION_OCR_CLASSIFIER_DEVICE=cpu
 PRODUCTION_WARMUP_MODELS=true
 PRODUCTION_REQUIRE_GPU=true
-PRODUCTION_GPU_DEVICE_ID=0
-PRODUCTION_STUDENT_MODEL_DIR=models/student_extractor/gemma3_270m_shortkey_v8/merged_model
+PRODUCTION_GPU_DEVICE_ID=2
+PRODUCTION_STUDENT_MODEL_DIR=output/student_extractor_qwen3_1_7b_augmented_v9/merged_model
 PRODUCTION_STUDENT_PRECISION=bf16
 PRODUCTION_STUDENT_MAX_INPUT_TOKENS=4096
-PRODUCTION_STUDENT_MAX_NEW_TOKENS=512
+PRODUCTION_STUDENT_MAX_NEW_TOKENS=1024
 PRODUCTION_OCR_PAGE_TYPES=DIPLOMATIC_NOTE,APPLICANT_TABLE,APPLICANT_LIST
 PRODUCTION_OCR_ENABLE_REFINEMENT=false
 PRODUCTION_INCLUDE_RECONSTRUCTED_TEXT=false
 ```
 
-`OCR_RUNTIME_GPU_DEVICE_ID` and `PRODUCTION_GPU_DEVICE_ID` must match. The app
-fails at startup rather than silently placing one of the models on CPU.
+Do not set `CUDA_VISIBLE_DEVICES`: both settings use physical GPU IDs.
+
+## Install isolated dependencies
+
+The existing OCR environment receives only Paddle/ONNX dependencies:
+
+```bash
+.venv-ocr/bin/python -m pip install -r requirements-production-ocr-service.txt
+```
+
+The existing student environment receives only API/Transformers dependencies;
+install its CUDA-enabled Torch wheel separately before this command:
+
+```bash
+.venv-student/bin/python -m pip install -r requirements-production-extraction.txt
+```
+
+No environment contains both `paddlepaddle-gpu` and `torch`, so their pinned
+CUDA/cuDNN package versions cannot conflict.
 
 ## Start and verify
 
-Install the host-specific CUDA PyTorch wheel first, then:
+Start the private OCR service first. Bind it to loopback so it is not reachable
+from other machines:
 
-```bat
-pip install -r requirements-production-extraction.txt
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+```bash
+.venv-ocr/bin/python -m uvicorn app.production_ocr_main:app \
+  --host 127.0.0.1 --port 8001 --workers 1
 ```
 
-Use exactly one Uvicorn worker for each configured GPU. Multiple workers each
-load their own copy of all model weights and can exhaust VRAM.
+Verify OCR preload:
 
-Readiness becomes true only after model loading and warm-up finish:
+```bash
+curl -s http://127.0.0.1:8001/internal/v1/ocr/readiness | python3 -m json.tool
+```
 
-```bat
-curl http://127.0.0.1:8000/api/v1/document-extractions/readiness
+Then start the public student/orchestrator API:
+
+```bash
+.venv-student/bin/python -m uvicorn app.production_main:app \
+  --host 0.0.0.0 --port 8000 --workers 1
+```
+
+The public API reports ready only when both the student runtime and private OCR
+service are ready:
+
+```bash
+curl -s http://127.0.0.1:8000/api/v1/document-extractions/readiness \
+  | python3 -m json.tool
 ```
 
 Example request:
 
-```bat
-curl -X POST http://127.0.0.1:8000/api/v1/document-extractions -F "file=@scan.pdf;type=application/pdf"
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/document-extractions \
+  -F "file=@scan.pdf;type=application/pdf"
 ```
 
-The response contains the backend-validated full business object in
-`extraction`, the original compact v8 model result in `compact_model_output`,
-page-level classifier/OCR diagnostics, and stage timings. The API is
-single-flight: while the GPU worker is processing a PDF, another request gets
-HTTP 429 instead of competing for VRAM.
-
+Both services are single-flight. Concurrent work receives HTTP 429 rather than
+competing for GPU memory. The production path is stateless and does not write
+the extraction to the annotation database.
