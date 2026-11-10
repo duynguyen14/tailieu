@@ -236,7 +236,7 @@ class Settings(BaseSettings):
     production_student_max_input_tokens: int = Field(default=4096, ge=256, le=32768)
     production_student_max_new_tokens: int = Field(default=1024, ge=32, le=4096)
     production_student_torch_compile: bool = True
-    production_student_torch_compile_mode: str = "reduce-overhead"
+    production_student_torch_compile_mode: str = "default"
     production_student_cache_implementation: str = "static"
     production_ocr_page_types: str = (
         "DIPLOMATIC_NOTE,APPLICANT_TABLE,APPLICANT_LIST"

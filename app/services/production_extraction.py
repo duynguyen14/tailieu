@@ -170,23 +170,28 @@ class _StudentRuntime:
                         self._eager_forward,
                         mode=settings.production_student_torch_compile_mode,
                         fullgraph=False,
+                        dynamic=True,
                     )
                     mark_step = getattr(
                         getattr(torch, "compiler", None),
                         "cudagraph_mark_step_begin",
                         None,
                     )
-                    if callable(mark_step):
-                        def _compiled_forward(*args: Any, **kwargs: Any) -> Any:
-                            mark_step()
-                            return compiled_fn(*args, **kwargs)
 
-                        self.model.forward = _compiled_forward
-                    else:
-                        self.model.forward = compiled_fn
+                    def _selective_forward(*args: Any, **kwargs: Any) -> Any:
+                        input_ids = kwargs.get("input_ids")
+                        if input_ids is None and args:
+                            input_ids = args[0]
+                        if input_ids is not None and input_ids.shape[-1] == 1:
+                            if callable(mark_step):
+                                mark_step()
+                            return compiled_fn(*args, **kwargs)
+                        return self._eager_forward(*args, **kwargs)
+
+                    self.model.forward = _selective_forward
                     self.compiled = True
                     LOGGER.info(
-                        "Enabled torch.compile for student runtime; mode=%s cache=%s",
+                        "Enabled selective decode torch.compile for student runtime; mode=%s cache=%s",
                         settings.production_student_torch_compile_mode,
                         self.cache_implementation,
                     )
@@ -234,10 +239,67 @@ class _StudentRuntime:
 
     def warmup(self) -> None:
         # Generate a few tokens during warm-up so both prefill (prompt) and
-        # decode (1-token autoregressive step) CUDA graphs are compiled before
+        # decode (1-token autoregressive step) kernels are compiled before
         # readiness becomes true.
         warmup_tokens = 4 if self.compiled else 1
         self.generate("Warm-up only.", max_new_tokens=warmup_tokens, validate=False)
+
+    def _fast_greedy_decode(
+        self,
+        input_ids: Any,
+        attention_mask: Any | None,
+        *,
+        limit: int,
+    ) -> Any:
+        torch = self.torch
+        stop_set = set(self.stop_token_ids)
+        stop_tensor = torch.tensor(
+            self.stop_token_ids, device=input_ids.device, dtype=input_ids.dtype
+        )
+        prefill_kwargs: dict[str, Any] = {
+            "input_ids": input_ids,
+            "use_cache": True,
+            "return_dict": True,
+        }
+        if attention_mask is not None:
+            prefill_kwargs["attention_mask"] = attention_mask
+        supports_logits_to_keep = True
+        try:
+            prefill_out = self._eager_forward(**prefill_kwargs, logits_to_keep=1)
+        except TypeError:
+            supports_logits_to_keep = False
+            prefill_out = self._eager_forward(**prefill_kwargs)
+
+        past_key_values = prefill_out.past_key_values
+        next_token = prefill_out.logits[:, -1:, :].argmax(dim=-1)
+        generated_tokens = [next_token]
+        if limit <= 1 or int(next_token.item()) in stop_set:
+            return torch.cat(generated_tokens, dim=-1)[0]
+
+        step_extra: dict[str, Any] = {"logits_to_keep": 1} if supports_logits_to_keep else {}
+        for step in range(1, limit):
+            step_out = self.model.forward(
+                input_ids=next_token,
+                past_key_values=past_key_values,
+                use_cache=True,
+                return_dict=True,
+                **step_extra,
+            )
+            past_key_values = step_out.past_key_values
+            next_token = step_out.logits[:, -1:, :].argmax(dim=-1)
+            generated_tokens.append(next_token)
+            # Check EOS on GPU every 8 tokens (or immediately if token matches stop_tensor)
+            # to avoid blocking GPU->CPU synchronization on every single token.
+            if (step & 7) == 0 or step == limit - 1:
+                if torch.isin(torch.cat(generated_tokens[-8:], dim=-1), stop_tensor).any():
+                    break
+
+        all_tokens = torch.cat(generated_tokens, dim=-1)[0]
+        token_list = all_tokens.tolist()
+        for idx, tok in enumerate(token_list):
+            if tok in stop_set:
+                return all_tokens[: idx + 1]
+        return all_tokens
 
     def generate(
         self,
@@ -263,21 +325,17 @@ class _StudentRuntime:
         if self.device.startswith("cuda"):
             self.torch.cuda.synchronize(self.device)
         started = time.perf_counter()
-        gen_kwargs: dict[str, Any] = {
-            "max_new_tokens": max_new_tokens or self.max_new_tokens,
-            "do_sample": False,
-            "use_cache": True,
-            "pad_token_id": self.tokenizer.pad_token_id,
-            "eos_token_id": self.stop_token_ids,
-        }
-        if self.cache_implementation == "static":
-            gen_kwargs["cache_implementation"] = "static"
+        limit = max_new_tokens or self.max_new_tokens
         with self.torch.inference_mode():
             try:
-                generated = self.model.generate(**encoded, **gen_kwargs)
+                output_ids = self._fast_greedy_decode(
+                    encoded["input_ids"],
+                    encoded.get("attention_mask"),
+                    limit=limit,
+                )
             except Exception as exc:
                 LOGGER.warning(
-                    "Compiled/static student generation failed (%s); falling back to eager forward.",
+                    "Fast greedy student decode failed (%s); falling back to model.generate.",
                     exc,
                 )
                 if self.compiled:
@@ -286,12 +344,18 @@ class _StudentRuntime:
                     if hasattr(self.torch, "_dynamo"):
                         self.torch._dynamo.reset()
                 self.cache_implementation = "dynamic"
-                gen_kwargs.pop("cache_implementation", None)
-                generated = self.model.generate(**encoded, **gen_kwargs)
+                generated = self.model.generate(
+                    **encoded,
+                    max_new_tokens=limit,
+                    do_sample=False,
+                    use_cache=True,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    eos_token_id=self.stop_token_ids,
+                )
+                output_ids = generated[0, prompt_tokens:]
         if self.device.startswith("cuda"):
             self.torch.cuda.synchronize(self.device)
         latency_ms = (time.perf_counter() - started) * 1000
-        output_ids = generated[0, prompt_tokens:]
         generated_tokens = int(output_ids.shape[-1])
         raw = self.tokenizer.decode(output_ids, skip_special_tokens=True).strip()
         if not validate:

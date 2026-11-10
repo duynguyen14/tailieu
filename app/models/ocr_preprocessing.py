@@ -116,7 +116,7 @@ def detect_content_bbox(
     thumb_area = thumb_width * thumb_height
     minimum_area = max(5, round(thumb_area * 0.000003))
     components: list[tuple[int, int, int, int, int]] = []
-    valid_mask = np.zeros_like(ink)
+    valid_indices: list[int] = []
     valid_ink_pixels = 0
 
     for index in range(1, count):
@@ -145,13 +145,14 @@ def detect_content_bbox(
         if area >= thumb_area * 0.35:
             continue
         components.append((x, y, x + width, y + height, area))
-        valid_mask[labels == index] = 255
+        valid_indices.append(index)
         valid_ink_pixels += area
 
     ink_ratio = valid_ink_pixels / thumb_area if thumb_area else 0.0
     if len(components) < min_components or ink_ratio < min_content_area_ratio:
         return ContentDetection(None, len(components), ink_ratio)
 
+    valid_mask = np.isin(labels, valid_indices)
     ink_y, ink_x = np.nonzero(valid_mask)
     if not len(ink_x):
         return ContentDetection(None, len(components), ink_ratio)

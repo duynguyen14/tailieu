@@ -371,7 +371,10 @@ class ProductionOcrService:
         warnings: list[str] = []
 
         render_started = time.perf_counter()
-        rendered = self.renderer.render(pdf_path)
+        try:
+            rendered = self.renderer.render(pdf_path, include_png_bytes=False)
+        except TypeError:
+            rendered = self.renderer.render(pdf_path)
         render_ms = (time.perf_counter() - render_started) * 1000
         LOGGER.info(
             "OCR stage render filename=%r pages=%d elapsed_ms=%.1f",
@@ -543,7 +546,11 @@ class ProductionOcrService:
         assert self._orientation is not None
         output: list[_PreparedPage] = []
         for page in pages:
-            source = load_rgb_bytes(page.image_bytes)
+            source = (
+                page.pil_image.convert("RGB")
+                if page.pil_image is not None
+                else load_rgb_bytes(page.image_bytes)
+            )
             probe, detection = orientation_probe(
                 source,
                 thumbnail_max_side=self.settings.ocr_content_thumbnail_max_side,
@@ -561,7 +568,11 @@ class ProductionOcrService:
                 cached_detection = None
             else:
                 rotated = source
-                encoded_bytes = page.image_bytes if include_png_bytes else None
+                encoded_bytes = (
+                    (page.image_bytes or png_bytes(rotated))
+                    if include_png_bytes
+                    else None
+                )
                 cached_detection = detection
             width, height = rotated.size
             output.append(

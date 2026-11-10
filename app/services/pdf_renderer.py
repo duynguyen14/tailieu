@@ -12,9 +12,12 @@ class PdfRenderer:
         self._max_pages = max_pages
         self._max_render_pixels = max_render_pixels
 
-    def render(self, pdf_path: Path) -> list[RenderedPage]:
+    def render(
+        self, pdf_path: Path, *, include_png_bytes: bool = True
+    ) -> list[RenderedPage]:
         try:
             import pymupdf
+            from PIL import Image
         except ImportError as exc:  # pragma: no cover - packaging failure
             raise RuntimeError("PyMuPDF is required to render PDF files.") from exc
 
@@ -47,13 +50,22 @@ class PdfRenderer:
                         f"maximum is {self._max_render_pixels}."
                     )
                 pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+                pil_img = Image.frombytes(
+                    "RGB", (pixmap.width, pixmap.height), pixmap.samples
+                )
+                png_data = (
+                    pixmap.pil_tobytes(format="PNG", compress_level=1)
+                    if include_png_bytes
+                    else b""
+                )
                 pages.append(
                     RenderedPage(
                         page_index=page_index,
                         page_number=page_index + 1,
                         width=pixmap.width,
                         height=pixmap.height,
-                        image_bytes=pixmap.pil_tobytes(format="PNG", compress_level=1),
+                        image_bytes=png_data,
+                        pil_image=pil_img,
                     )
                 )
             return pages
