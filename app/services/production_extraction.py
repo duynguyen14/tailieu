@@ -1256,10 +1256,27 @@ class ProductionExtractionService:
             ocr_started = time.perf_counter()
             ocr_pages: list[_OcrPage] = []
             target_types = set(self.settings.production_ocr_page_type_list)
+            has_target_page = any(
+                prediction.label.value in target_types for prediction in predictions
+            )
+            fallback_all_pages = bool(prepared_pages) and not has_target_page
+            if fallback_all_pages:
+                fallback_msg = (
+                    "No page matched configured target page types "
+                    f"({', '.join(self.settings.production_ocr_page_type_list)}); "
+                    f"falling back to OCR on all {len(prepared_pages)} page(s)."
+                )
+                warnings.append(fallback_msg)
+                LOGGER.warning(
+                    "OCR stage classification fallback filename=%r pages=%d message=%s",
+                    filename,
+                    len(prepared_pages),
+                    fallback_msg,
+                )
             page_results: list[ProductionPageResult] = []
             for page, prediction in zip(prepared_pages, predictions, strict=True):
                 page_type = prediction.label.value
-                use_page = page_type in target_types
+                use_page = fallback_all_pages or (page_type in target_types)
                 tokens: list[OcrTokenPrediction] = []
                 page_ocr_ms = 0.0
                 if use_page:

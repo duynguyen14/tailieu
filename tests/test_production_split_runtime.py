@@ -264,3 +264,83 @@ def test_split_runtime_proxies_page_classification_preview() -> None:
     assert result.pages[0].predicted_type == "OTHER"
     assert result.pages[0].is_extraction_target is False
     assert result.pages[0].top_predictions[1].label == "DIPLOMATIC_NOTE"
+
+
+def test_ocr_reconstruct_falls_back_to_all_pages_when_no_page_matches_target_types() -> None:
+    from types import SimpleNamespace
+    from PIL import Image
+    from app.domain.types import RenderedPage
+    from app.models.paddle_ocr_engine import OcrTokenPrediction
+    from app.services.production_ocr import ProductionOcrService
+
+    settings = Settings(
+        _env_file=None,
+        production_ocr_service_enabled=True,
+        production_ocr_enable_content_crop=False,
+        production_ocr_enable_small_text_upscale=False,
+        production_ocr_enable_refinement=False,
+        ocr_enable_orientation=False,
+    )
+
+    class FakeRenderer:
+        def render(self, pdf_path: Path, *, include_png_bytes: bool = True):
+            return [
+                RenderedPage(
+                    page_index=0,
+                    page_number=1,
+                    width=400,
+                    height=300,
+                    image_bytes=b"",
+                    pil_image=Image.new("RGB", (400, 300), "white"),
+                ),
+                RenderedPage(
+                    page_index=1,
+                    page_number=2,
+                    width=400,
+                    height=300,
+                    image_bytes=b"",
+                    pil_image=Image.new("RGB", (400, 300), "white"),
+                ),
+            ]
+
+    class FakeClassifier:
+        def predict_images(self, images, *, top_k: int = 1):
+            return [
+                SimpleNamespace(label=SimpleNamespace(value="OTHER"), confidence=0.91),
+                SimpleNamespace(label=SimpleNamespace(value="PASSPORT_FRONT"), confidence=0.88),
+            ]
+
+    class FakeOrientation:
+        def predict_image(self, image):
+            return SimpleNamespace(angle=0, confidence=0.99)
+
+    class FakeOcr:
+        def predict_image(self, image):
+            return [
+                OcrTokenPrediction(
+                    token_id="t1",
+                    token_index=0,
+                    text="FALLBACK TEXT",
+                    confidence=0.99,
+                    bbox=(10, 10, 120, 30),
+                    polygon=((10, 10), (120, 10), (120, 30), (10, 30)),
+                )
+            ]
+
+    ocr_service = ProductionOcrService(settings, cast(PdfRenderer, FakeRenderer()))
+    ocr_service._ready = True
+    ocr_service._classifier = cast(Any, FakeClassifier())
+    ocr_service._orientation = cast(Any, FakeOrientation())
+    ocr_service._ocr = cast(Any, FakeOcr())
+
+    result = ocr_service.reconstruct(
+        pdf_path=Path("dummy.pdf"),
+        filename="dummy.pdf",
+        sha256="abc1234567890",
+    )
+
+    assert result.page_count == 2
+    assert [p.used_for_extraction for p in result.pages] == [True, True]
+    assert [p.ocr_token_count for p in result.pages] == [1, 1]
+    assert "FALLBACK TEXT" in result.reconstructed_text
+    assert any("falling back to OCR on all 2 page(s)" in w for w in result.warnings)
