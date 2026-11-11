@@ -175,6 +175,7 @@ class PaddleOcrEngine:
             use_doc_orientation_classify=False,
             use_doc_unwarping=False,
             use_textline_orientation=False,
+            text_recognition_batch_size=settings.ocr_recognition_batch_size,
             device=self.effective_device,
             enable_hpi=settings.ocr_enable_hpi,
             cpu_threads=settings.ocr_cpu_threads,
@@ -197,6 +198,13 @@ class PaddleOcrEngine:
 
         return self._predict_raw(rgb_to_bgr_array(image))
 
+    def predict_images(self, images: list[Any]) -> list[list[OcrTokenPrediction]]:
+        """Recognize PIL images in one PaddleOCR call without filesystem I/O."""
+
+        from app.models.ocr_preprocessing import rgb_to_bgr_array
+
+        return self._predict_many_raw([rgb_to_bgr_array(image) for image in images])
+
     def _predict_raw(self, raw_input: Any) -> list[OcrTokenPrediction]:
         output = self._pipeline.predict(raw_input)
         try:
@@ -216,7 +224,14 @@ class PaddleOcrEngine:
         for image_path in image_paths:
             if not image_path.is_file():
                 raise FileNotFoundError(f"OCR page image does not exist: {image_path}")
-        output = self._pipeline.predict([str(path) for path in image_paths])
+        return self._predict_many_raw([str(path) for path in image_paths])
+
+    def _predict_many_raw(
+        self, raw_inputs: list[Any]
+    ) -> list[list[OcrTokenPrediction]]:
+        if not raw_inputs:
+            return []
+        output = self._pipeline.predict(raw_inputs)
         results = [
             parse_ocr_tokens(
                 _result_payload(result),
@@ -224,10 +239,10 @@ class PaddleOcrEngine:
             )
             for result in output
         ]
-        if len(results) != len(image_paths):
+        if len(results) != len(raw_inputs):
             raise RuntimeError(
                 "PaddleOCR returned a different number of results "
-                f"({len(results)}) than input images ({len(image_paths)})."
+                f"({len(results)}) than input images ({len(raw_inputs)})."
             )
         return results
 

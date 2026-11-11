@@ -432,6 +432,34 @@ class ProductionOcrService:
                     len(prepared_pages),
                     fallback_msg,
                 )
+            target_rows = [
+                (page, prediction)
+                for page, prediction in zip(prepared_pages, predictions, strict=True)
+                if fallback_all_pages or prediction.label.value in target_types
+            ]
+            batch_result = None
+            if (
+                target_rows
+                and not self.settings.production_ocr_enable_small_text_upscale
+                and not self.settings.production_ocr_enable_refinement
+            ):
+                from app.services.ocr_batch import recognize_pages_in_memory
+
+                batch_result = recognize_pages_in_memory(
+                    [row[0] for row in target_rows],
+                    settings=self.settings,
+                    ocr=self._ocr,
+                )
+                LOGGER.info(
+                    "OCR stage in-memory batch filename=%r pages=%d inference_ms=%.1f",
+                    filename,
+                    len(target_rows),
+                    batch_result.inference_time_ms,
+                )
+            batch_index_by_page = {
+                page.page_number: index
+                for index, (page, _prediction) in enumerate(target_rows)
+            }
             page_results: list[ProductionPageResult] = []
             for page, prediction in zip(prepared_pages, predictions, strict=True):
                 page_type = prediction.label.value
@@ -439,9 +467,14 @@ class ProductionOcrService:
                 tokens: list[OcrTokenPrediction] = []
                 page_ocr_ms = 0.0
                 if use_page:
-                    page_ocr_started = time.perf_counter()
-                    tokens = self._recognize_page(page)
-                    page_ocr_ms = (time.perf_counter() - page_ocr_started) * 1000
+                    if batch_result is not None:
+                        batch_index = batch_index_by_page[page.page_number]
+                        tokens = batch_result.tokens_by_page[batch_index]
+                        page_ocr_ms = batch_result.processing_time_ms_by_page[batch_index]
+                    else:
+                        page_ocr_started = time.perf_counter()
+                        tokens = self._recognize_page(page)
+                        page_ocr_ms = (time.perf_counter() - page_ocr_started) * 1000
                     ocr_pages.append(
                         _OcrPage(prepared=page, page_type=page_type, tokens=tokens)
                     )

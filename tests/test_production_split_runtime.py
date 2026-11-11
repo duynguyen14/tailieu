@@ -315,7 +315,11 @@ def test_ocr_reconstruct_falls_back_to_all_pages_when_no_page_matches_target_typ
             return SimpleNamespace(angle=0, confidence=0.99)
 
     class FakeOcr:
+        batch_calls = 0
+        single_calls = 0
+
         def predict_image(self, image):
+            self.single_calls += 1
             return [
                 OcrTokenPrediction(
                     token_id="t1",
@@ -327,11 +331,28 @@ def test_ocr_reconstruct_falls_back_to_all_pages_when_no_page_matches_target_typ
                 )
             ]
 
+        def predict_images(self, images):
+            self.batch_calls += 1
+            return [
+                [
+                    OcrTokenPrediction(
+                        token_id="t1",
+                        token_index=0,
+                        text="FALLBACK TEXT",
+                        confidence=0.99,
+                        bbox=(10, 10, 120, 30),
+                        polygon=((10, 10), (120, 10), (120, 30), (10, 30)),
+                    )
+                ]
+                for _image in images
+            ]
+
     ocr_service = ProductionOcrService(settings, cast(PdfRenderer, FakeRenderer()))
     ocr_service._ready = True
     ocr_service._classifier = cast(Any, FakeClassifier())
     ocr_service._orientation = cast(Any, FakeOrientation())
-    ocr_service._ocr = cast(Any, FakeOcr())
+    fake_ocr = FakeOcr()
+    ocr_service._ocr = cast(Any, fake_ocr)
 
     result = ocr_service.reconstruct(
         pdf_path=Path("dummy.pdf"),
@@ -342,5 +363,7 @@ def test_ocr_reconstruct_falls_back_to_all_pages_when_no_page_matches_target_typ
     assert result.page_count == 2
     assert [p.used_for_extraction for p in result.pages] == [True, True]
     assert [p.ocr_token_count for p in result.pages] == [1, 1]
+    assert fake_ocr.batch_calls == 1
+    assert fake_ocr.single_calls == 0
     assert "FALLBACK TEXT" in result.reconstructed_text
     assert any("falling back to OCR on all 2 page(s)" in w for w in result.warnings)

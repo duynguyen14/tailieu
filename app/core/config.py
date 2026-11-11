@@ -116,6 +116,7 @@ class Settings(BaseSettings):
     ocr_recognition_model_dir: Path | None = None
     ocr_model_version: str = "pp-ocrv6-medium-v1"
     ocr_enable_hpi: bool = False
+    ocr_recognition_batch_size: int = Field(default=16, ge=1, le=256)
     ocr_cpu_threads: int = Field(default=8, ge=1, le=128)
     ocr_min_confidence: float = Field(default=0.50, ge=0.0, le=1.0)
     ocr_target_page_types: str = "DIPLOMATIC_NOTE,APPLICANT_TABLE,APPLICANT_LIST"
