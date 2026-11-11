@@ -12,6 +12,8 @@ from app.db.database import Database
 from app.db.models import (
     AnnotationDocument,
     AnnotationPage,
+    OcrRun,
+    OcrToken,
     VisaFormAnnotation,
     VisaFormFieldAnnotation,
     utc_now,
@@ -29,6 +31,10 @@ from app.schemas.visa_form_annotation import (
     VisaFormReviewStats,
 )
 from app.services.storage import AnnotationStorage
+from app.services.visa_form_anchor_extractor import (
+    ExtractedFieldResult,
+    extract_visa_form_fields,
+)
 
 DEFAULT_TEMPLATE_VERSION = "visa-application-form-v1"
 
@@ -157,6 +163,9 @@ class VisaFormAnnotationService:
         page_id: str,
         template_version: str = DEFAULT_TEMPLATE_VERSION,
         replace_existing: bool = False,
+        ocr_tokens: Sequence[Any] | None = None,
+        use_ocr: bool = True,
+        run_ocr_if_missing: bool = True,
     ) -> str:
         with self._database.session() as session:
             page = session.get(AnnotationPage, page_id)
@@ -180,6 +189,36 @@ class VisaFormAnnotationService:
                 active.is_active = False
                 active.updated_at = utc_now()
 
+            # Attempt OCR token retrieval / execution
+            tokens: Sequence[Any] | None = ocr_tokens
+            if tokens is None and use_ocr:
+                active_ocr = session.scalar(
+                    select(OcrRun)
+                    .where(
+                        OcrRun.page_id == page.id,
+                        OcrRun.is_active == true(),
+                        OcrRun.status == "COMPLETED",
+                    )
+                    .order_by(OcrRun.created_at.desc(), OcrRun.id.desc())
+                    .limit(1)
+                )
+                if active_ocr is not None:
+                    tokens = list(
+                        session.scalars(
+                            select(OcrToken)
+                            .where(OcrToken.ocr_run_id == active_ocr.id)
+                            .order_by(OcrToken.token_index.asc())
+                        ).all()
+                    )
+                elif run_ocr_if_missing:
+                    from app.services.visa_form_ocr_runner import run_ocr_for_page
+
+                    tokens = run_ocr_for_page(
+                        page=page,
+                        storage=self._storage,
+                        database=self._database,
+                    )
+
             annotation = VisaFormAnnotation(
                 id=str(uuid4()),
                 page_id=page.id,
@@ -193,28 +232,99 @@ class VisaFormAnnotationService:
             )
             session.add(annotation)
             session.flush()
-            for order, item in enumerate(VISA_FORM_TEMPLATE_FIELDS, start=1):
-                x1, y1, x2, y2 = normalized_to_pixel(
-                    item.normalized_bbox, page.width, page.height
-                )
-                annotation.fields.append(
-                    VisaFormFieldAnnotation(
-                        id=str(uuid4()),
-                        field_code=item.code,
-                        field_order=order,
-                        value_text=None,
-                        x1=x1,
-                        y1=y1,
-                        x2=x2,
-                        y2=y2,
-                        nx1=item.normalized_bbox[0],
-                        ny1=item.normalized_bbox[1],
-                        nx2=item.normalized_bbox[2],
-                        ny2=item.normalized_bbox[3],
+
+            if tokens:
+                extracted = extract_visa_form_fields(tokens, page.width, page.height)
+                for item in extracted:
+                    annotation.fields.append(
+                        VisaFormFieldAnnotation(
+                            id=str(uuid4()),
+                            field_code=item.field_code,
+                            field_order=item.field_order,
+                            value_text=item.value_text,
+                            x1=item.bbox[0],
+                            y1=item.bbox[1],
+                            x2=item.bbox[2],
+                            y2=item.bbox[3],
+                            nx1=item.normalized_bbox[0],
+                            ny1=item.normalized_bbox[1],
+                            nx2=item.normalized_bbox[2],
+                            ny2=item.normalized_bbox[3],
+                        )
                     )
-                )
+            else:
+                for order, item in enumerate(VISA_FORM_TEMPLATE_FIELDS, start=1):
+                    x1, y1, x2, y2 = normalized_to_pixel(
+                        item.normalized_bbox, page.width, page.height
+                    )
+                    annotation.fields.append(
+                        VisaFormFieldAnnotation(
+                            id=str(uuid4()),
+                            field_code=item.code,
+                            field_order=order,
+                            value_text=None,
+                            x1=x1,
+                            y1=y1,
+                            x2=x2,
+                            y2=y2,
+                            nx1=item.normalized_bbox[0],
+                            ny1=item.normalized_bbox[1],
+                            nx2=item.normalized_bbox[2],
+                            ny2=item.normalized_bbox[3],
+                        )
+                    )
             session.flush()
             return annotation.id
+
+    def extract_page_fields(
+        self,
+        page_id: str,
+        *,
+        ocr_tokens: Sequence[Any] | None = None,
+        use_ocr: bool = True,
+        run_ocr_if_missing: bool = True,
+    ) -> list[ExtractedFieldResult]:
+        with self._database.session() as session:
+            page = session.get(AnnotationPage, page_id)
+            if page is None:
+                raise VisaFormAnnotationNotFoundError("Annotation page was not found.")
+
+            tokens: Sequence[Any] | None = ocr_tokens
+            if tokens is None and use_ocr:
+                active_ocr = session.scalar(
+                    select(OcrRun)
+                    .where(
+                        OcrRun.page_id == page.id,
+                        OcrRun.is_active == true(),
+                        OcrRun.status == "COMPLETED",
+                    )
+                    .order_by(OcrRun.created_at.desc(), OcrRun.id.desc())
+                    .limit(1)
+                )
+                if active_ocr is not None:
+                    tokens = list(
+                        session.scalars(
+                            select(OcrToken)
+                            .where(OcrToken.ocr_run_id == active_ocr.id)
+                            .order_by(OcrToken.token_index.asc())
+                        ).all()
+                    )
+                elif run_ocr_if_missing:
+                    from app.services.visa_form_ocr_runner import run_ocr_for_page
+
+                    tokens = run_ocr_for_page(
+                        page=page,
+                        storage=self._storage,
+                        database=self._database,
+                    )
+
+            if not tokens:
+                from app.services.visa_form_anchor_extractor import VisaFormAnchorExtractor
+
+                extractor = VisaFormAnchorExtractor([], page.width, page.height)
+                return extractor.extract_fields()
+
+            return extract_visa_form_fields(tokens, page.width, page.height)
 
     def get_detail(self, annotation_id: str) -> VisaFormAnnotationDetail:
         with self._database.session() as session:

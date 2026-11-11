@@ -102,6 +102,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int, default=0, help="0 means all eligible pages")
     parser.add_argument("--page-id", default=None)
     parser.add_argument("--case-id", default=None)
+    parser.add_argument("--page-type", default=None, help="Target page label (e.g. VISA_APPLICATION_FORM)")
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
         "--pending-review-only",
@@ -327,9 +328,12 @@ def run(args: argparse.Namespace) -> OcrSummary:
     storage = AnnotationStorage(settings.annotation_storage_path)
     summary = OcrSummary()
     try:
+        target_page_types = (
+            [args.page_type] if args.page_type else settings.ocr_target_page_type_list
+        )
         pages = eligible_pages(
             database,
-            page_types=settings.ocr_target_page_type_list,
+            page_types=target_page_types,
             page_id=args.page_id,
             case_id=args.case_id,
             limit=args.limit,
