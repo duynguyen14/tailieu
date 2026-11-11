@@ -7,159 +7,159 @@ from dataclasses import dataclass, field
 from typing import Any
 
 # Default template bounding boxes (in 0..1000 normalized coordinates)
-# Used as baseline reference for anchor positions and fallback interpolation.
+# Baseline reference calibrated to standard Mẫu NA1 forms.
 TEMPLATE_FIELD_METADATA: dict[str, dict[str, Any]] = {
     "full_name": {
         "order": 1,
         "label": "Họ và tên",
         "column": "left",
         "field_type": "inline",
-        "baseline_anchor": (60, 165, 175, 205),
-        "baseline_value": (145, 176, 390, 200),
+        "baseline_anchor": (90, 200, 220, 225),
+        "baseline_value": (215, 204, 420, 225),
     },
     "date_of_birth": {
         "order": 2,
         "label": "Ngày sinh",
         "column": "left",
         "field_type": "inline",
-        "baseline_anchor": (60, 205, 165, 240),
-        "baseline_value": (160, 211, 350, 235),
+        "baseline_anchor": (90, 235, 210, 260),
+        "baseline_value": (215, 239, 320, 260),
     },
     "place_of_birth": {
         "order": 3,
         "label": "Nơi sinh",
         "column": "left",
         "field_type": "inline",
-        "baseline_anchor": (60, 240, 165, 275),
-        "baseline_value": (160, 247, 390, 271),
+        "baseline_anchor": (90, 270, 220, 295),
+        "baseline_value": (225, 274, 300, 295),
     },
     "gender": {
         "order": 4,
         "label": "Giới tính",
         "column": "left",
         "field_type": "inline",
-        "baseline_anchor": (60, 275, 140, 312),
-        "baseline_value": (135, 283, 300, 307),
+        "baseline_anchor": (90, 305, 175, 330),
+        "baseline_value": (180, 306, 250, 328),
     },
     "nationality": {
         "order": 5,
         "label": "Quốc tịch",
         "column": "left",
         "field_type": "inline",
-        "baseline_anchor": (60, 312, 165, 348),
-        "baseline_value": (160, 318, 350, 343),
+        "baseline_anchor": (90, 338, 210, 363),
+        "baseline_value": (215, 341, 300, 362),
     },
     "contact_address": {
         "order": 6,
         "label": "Địa chỉ liên hệ",
         "column": "left",
         "field_type": "block",
-        "baseline_anchor": (60, 355, 150, 390),
-        "baseline_value": (75, 375, 440, 420),
+        "baseline_anchor": (90, 405, 180, 430),
+        "baseline_value": (170, 408, 380, 450),
     },
     "contact_phone": {
         "order": 7,
         "label": "Điện thoại liên hệ",
         "column": "left",
         "field_type": "inline",
-        "baseline_anchor": (60, 415, 150, 448),
-        "baseline_value": (145, 420, 355, 445),
+        "baseline_anchor": (90, 440, 210, 465),
+        "baseline_value": (210, 443, 310, 463),
     },
     "contact_email": {
         "order": 8,
         "label": "Email liên hệ",
         "column": "left",
         "field_type": "inline",
-        "baseline_anchor": (60, 448, 115, 482),
-        "baseline_value": (95, 453, 410, 480),
+        "baseline_anchor": (90, 475, 185, 500),
+        "baseline_value": (185, 476, 380, 497),
     },
     "sponsor_name": {
         "order": 9,
         "label": "Tên người/cơ quan mời",
         "column": "left",
         "field_type": "inline",
-        "baseline_anchor": (60, 495, 130, 532),
-        "baseline_value": (125, 500, 420, 532),
+        "baseline_anchor": (90, 525, 175, 550),
+        "baseline_value": (175, 529, 390, 558),
     },
     "sponsor_phone": {
         "order": 10,
         "label": "Điện thoại người/cơ quan mời",
         "column": "left",
         "field_type": "inline",
-        "baseline_anchor": (60, 532, 140, 568),
-        "baseline_value": (135, 538, 365, 566),
+        "baseline_anchor": (90, 560, 205, 585),
+        "baseline_value": (205, 563, 420, 592),
     },
     "passport_number": {
         "order": 11,
         "label": "Số hộ chiếu",
         "column": "right",
         "field_type": "inline",
-        "baseline_anchor": (510, 205, 630, 240),
-        "baseline_value": (625, 211, 870, 236),
+        "baseline_anchor": (520, 235, 680, 260),
+        "baseline_value": (680, 237, 780, 258),
     },
     "passport_expiration": {
         "order": 12,
         "label": "Hạn hộ chiếu",
         "column": "right",
         "field_type": "inline",
-        "baseline_anchor": (510, 240, 640, 275),
-        "baseline_value": (635, 247, 875, 272),
+        "baseline_anchor": (520, 270, 660, 295),
+        "baseline_value": (660, 270, 750, 292),
     },
     "number_of_entries": {
         "order": 13,
         "label": "Số lần nhập cảnh",
         "column": "right",
         "field_type": "inline",
-        "baseline_anchor": (510, 275, 640, 312),
-        "baseline_value": (635, 283, 875, 308),
+        "baseline_anchor": (520, 305, 685, 330),
+        "baseline_value": (685, 305, 770, 325),
     },
     "entry_date": {
         "order": 14,
         "label": "Ngày dự kiến nhập cảnh",
         "column": "right",
         "field_type": "inline",
-        "baseline_anchor": (510, 312, 655, 348),
-        "baseline_value": (650, 319, 885, 344),
+        "baseline_anchor": (520, 335, 720, 360),
+        "baseline_value": (720, 338, 810, 359),
     },
     "exit_date": {
         "order": 15,
         "label": "Ngày dự kiến xuất cảnh",
         "column": "right",
         "field_type": "inline",
-        "baseline_anchor": (510, 348, 655, 382),
-        "baseline_value": (650, 354, 885, 379),
+        "baseline_anchor": (520, 370, 715, 395),
+        "baseline_value": (715, 372, 805, 393),
     },
     "submission_place": {
         "order": 16,
         "label": "Nơi nộp hồ sơ",
         "column": "right",
         "field_type": "block",
-        "baseline_anchor": (510, 390, 680, 425),
-        "baseline_value": (515, 405, 890, 440),
+        "baseline_anchor": (520, 405, 730, 435),
+        "baseline_value": (550, 440, 720, 460),
     },
     "collection_place": {
         "order": 17,
         "label": "Nơi nhận thị thực",
         "column": "right",
         "field_type": "block",
-        "baseline_anchor": (510, 455, 680, 492),
-        "baseline_value": (515, 474, 890, 508),
+        "baseline_anchor": (520, 470, 730, 500),
+        "baseline_value": (550, 505, 860, 540),
     },
     "purpose_of_entry": {
         "order": 18,
         "label": "Mục đích nhập cảnh",
         "column": "right",
         "field_type": "block",
-        "baseline_anchor": (510, 505, 650, 545),
-        "baseline_value": (625, 520, 975, 565),
+        "baseline_anchor": (520, 540, 680, 570),
+        "baseline_value": (700, 540, 920, 610),
     },
     "application_date": {
         "order": 19,
         "label": "Ngày làm đơn",
         "column": "right",
         "field_type": "inline",
-        "baseline_anchor": (550, 680, 650, 725),
-        "baseline_value": (650, 690, 900, 725),
+        "baseline_anchor": (620, 710, 730, 735),
+        "baseline_value": (735, 710, 830, 730),
     },
 }
 
@@ -167,7 +167,27 @@ FIELD_CODES_ORDERED = tuple(
     sorted(TEMPLATE_FIELD_METADATA.keys(), key=lambda k: TEMPLATE_FIELD_METADATA[k]["order"])
 )
 
-FORMAT_HINT_PAT = re.compile(r"\(?\s*dd[\/\.\-]mm[\/\.\-]yyyy\s*\)?", re.IGNORECASE)
+FORMAT_HINT_PAT = re.compile(r"\(?\s*d{1,2}[\/\.\-]mm[\/\.\-]yyyy\s*\)?", re.IGNORECASE)
+
+COMPOUND_PREFIX_PATTERNS: list[re.Pattern] = [
+    re.compile(r"^(?:1\s*[\.\)]?\s*)?(?:full\s*name|ten\s*day\s*du|ho\s*(?:va\s*)?ten)\s*[:\s]+", re.I),
+    re.compile(r"^(?:2\s*[\.\)]?\s*)?(?:date\s*of\s*birth|ngay\s*sinh)\s*(?:\([^\)]*\))?\s*[:\s]+", re.I),
+    re.compile(r"^(?:3\s*[\.\)]?\s*)?(?:place\s*of\s*birth|noi\s*sinh)\s*[:\s]+", re.I),
+    re.compile(r"^(?:4\s*[\.\)]?\s*)?(?:gender|gioi\s*tinh|sex)\s*[:\s]+", re.I),
+    re.compile(r"^(?:5\s*[\.\)]?\s*)?(?:nationality|quoc\s*tich)\s*[:\s]+", re.I),
+    re.compile(r"^(?:address|dia\s*chi)\s*[:\s]+", re.I),
+    re.compile(r"^(?:telephone|dien\s*thoai|phone|tel)\s*[:\s]+", re.I),
+    re.compile(r"^(?:email)\s*[:\s]+", re.I),
+    re.compile(r"^(?:8\s*[\.\)]?\s*)?(?:passport\s*number|so\s*ho\s*chieu)\s*[:\s]+", re.I),
+    re.compile(r"^(?:date\s*of\s*expiry|ngay\s*het\s*han|het\s*han\s*ho\s*chieu|expiry|expiration)\s*(?:\([^\)]*\))?\s*[:\s]+", re.I),
+    re.compile(r"^(?:9\s*[\.\)]?\s*)?(?:number\s*of\s*entries|so\s*lan\s*nhap\s*canh)\s*[:\s]+", re.I),
+    re.compile(r"^(?:10\s*[\.\)]?\s*)?(?:proposed\s*date\s*of\s*entry|ngay\s*du\s*kien\s*nhap\s*canh|du\s*kien\s*nhap\s*canh)\s*(?:\([^\)]*\))?\s*[:\s]+", re.I),
+    re.compile(r"^(?:11\s*[\.\)]?\s*)?(?:proposed\s*date\s*of\s*exit|ngay\s*du\s*kien\s*xuat\s*canh|du\s*kien\s*xuat\s*canh)\s*(?:\([^\)]*\))?\s*[:\s]+", re.I),
+    re.compile(r"^(?:12\s*[\.\)]?\s*)?(?:place\s*of\s*visa\s*submission|noi\s*nop\s*ho\s*so)\s*[:\s]+", re.I),
+    re.compile(r"^(?:13\s*[\.\)]?\s*)?(?:place\s*of\s*visa\s*collection|noi\s*nhan\s*thi\s*thuc)\s*[:\s]+", re.I),
+    re.compile(r"^(?:14\s*[\.\)]?\s*)?(?:purpose\s*of\s*entry|muc\s*dich\s*nhap\s*canh)\s*[:\s]+", re.I),
+    re.compile(r"^(?:date\s*[\/\:]?\s*ngay|ngay\s*lam\s*don)\s*[:\s]+", re.I),
+]
 
 
 def strip_accents_and_lower(text: str) -> str:
@@ -231,6 +251,7 @@ class DetectedAnchor:
     nx2: int
     ny2: int
     tokens: list[ExtractedToken]
+    primary_nx2: int = 0
     confidence: float = 1.0
 
     @property
@@ -294,27 +315,94 @@ def normalize_tokens(raw_tokens: Sequence[Any], width: int, height: int) -> list
         x2 = max(x1 + 1, min(w, int(x2)))
         y2 = max(y1 + 1, min(h, int(y2)))
 
-        nx1 = max(0, min(998, round(x1 * 1000 / w)))
-        ny1 = max(0, min(998, round(y1 * 1000 / h)))
-        nx2 = max(nx1 + 1, min(1000, round(x2 * 1000 / w)))
-        ny2 = max(ny1 + 1, min(1000, round(y2 * 1000 / h)))
-
         clean = strip_accents_and_lower(text)
-        results.append(
-            ExtractedToken(
-                text=text,
-                clean_text=clean,
-                x1=x1,
-                y1=y1,
-                x2=x2,
-                y2=y2,
-                nx1=nx1,
-                ny1=ny1,
-                nx2=nx2,
-                ny2=ny2,
-                confidence=float(conf),
+
+        # Check if line contains both anchor pattern and value text
+        matched_prefix_end = None
+        for pat in COMPOUND_PREFIX_PATTERNS:
+            m = pat.match(clean)
+            if m:
+                val_text = text[m.end() :].strip()
+                if val_text:
+                    matched_prefix_end = m.end()
+                break
+
+        if matched_prefix_end:
+            # Compound token: split into anchor token + value token
+            total_chars = max(1, len(text))
+            ratio = matched_prefix_end / total_chars
+            split_x = max(x1 + 1, min(x2 - 1, x1 + round((x2 - x1) * ratio)))
+
+            p_text = text[:matched_prefix_end].strip()
+            v_text = text[matched_prefix_end:].strip()
+
+            # Token A (anchor)
+            anx1 = max(0, min(998, round(x1 * 1000 / w)))
+            any1 = max(0, min(998, round(y1 * 1000 / h)))
+            anx2 = max(anx1 + 1, min(1000, round(split_x * 1000 / w)))
+            any2 = max(any1 + 1, min(1000, round(y2 * 1000 / h)))
+            results.append(
+                ExtractedToken(
+                    text=p_text,
+                    clean_text=strip_accents_and_lower(p_text),
+                    x1=x1,
+                    y1=y1,
+                    x2=split_x,
+                    y2=y2,
+                    nx1=anx1,
+                    ny1=any1,
+                    nx2=anx2,
+                    ny2=any2,
+                    confidence=float(conf),
+                    is_anchor=True,
+                )
             )
-        )
+
+            # Token B (value)
+            vnx1 = max(0, min(998, round(split_x * 1000 / w)))
+            vny1 = max(0, min(998, round(y1 * 1000 / h)))
+            vnx2 = max(vnx1 + 1, min(1000, round(x2 * 1000 / w)))
+            vny2 = max(vny1 + 1, min(1000, round(y2 * 1000 / h)))
+
+            # If value token is just format hint (e.g. '(DD/MM/YYYY)'), mark as anchor
+            is_hint = bool(FORMAT_HINT_PAT.fullmatch(v_text))
+            results.append(
+                ExtractedToken(
+                    text=v_text,
+                    clean_text=strip_accents_and_lower(v_text),
+                    x1=split_x,
+                    y1=y1,
+                    x2=x2,
+                    y2=y2,
+                    nx1=vnx1,
+                    ny1=vny1,
+                    nx2=vnx2,
+                    ny2=vny2,
+                    confidence=float(conf),
+                    is_anchor=is_hint,
+                )
+            )
+        else:
+            nx1 = max(0, min(998, round(x1 * 1000 / w)))
+            ny1 = max(0, min(998, round(y1 * 1000 / h)))
+            nx2 = max(nx1 + 1, min(1000, round(x2 * 1000 / w)))
+            ny2 = max(ny1 + 1, min(1000, round(y2 * 1000 / h)))
+            results.append(
+                ExtractedToken(
+                    text=text,
+                    clean_text=clean,
+                    x1=x1,
+                    y1=y1,
+                    x2=x2,
+                    y2=y2,
+                    nx1=nx1,
+                    ny1=ny1,
+                    nx2=nx2,
+                    ny2=ny2,
+                    confidence=float(conf),
+                )
+            )
+
     return results
 
 
@@ -369,13 +457,13 @@ class VisaFormAnchorExtractor:
         if not self.tokens:
             return self._fallback_all_fields()
 
-        # Step 1: Detect section headers first (Section 6 Contact, Section 7 Sponsor)
+        # Step 1: Detect section headers (Section 6 Contact, Section 7 Sponsor)
         self._detect_section_headers()
 
         # Step 2: Detect all 19 field anchors
         self._detect_all_field_anchors()
 
-        # Step 3: Compute global coordinate transformation (scale & shift) from detected anchors
+        # Step 3: Compute coordinate transformation (scale & shift) from detected anchors
         scale_x, shift_x, scale_y, shift_y = self._fit_coordinate_transform()
 
         # Step 4: Extract bounding box and value_text for each field
@@ -421,15 +509,15 @@ class VisaFormAnchorExtractor:
                         t.is_anchor = True
 
         if self.section6_ny is None:
-            self.section6_ny = 345
+            self.section6_ny = 375
         if self.section7_ny is None:
-            self.section7_ny = 480
+            self.section7_ny = 495
 
     def _detect_all_field_anchors(self) -> None:
         anchor_rules: dict[str, dict[str, Any]] = {
             "full_name": {
                 "col": "left",
-                "y_range": (110, 240),
+                "y_range": (160, 240),
                 "patterns": [
                     re.compile(r"(?:1\s*[\.\)]?\s*)?full\s*name"),
                     re.compile(r"ten\s*day\s*du"),
@@ -439,7 +527,7 @@ class VisaFormAnchorExtractor:
             },
             "date_of_birth": {
                 "col": "left",
-                "y_range": (160, 275),
+                "y_range": (205, 275),
                 "patterns": [
                     re.compile(r"(?:2\s*[\.\)]?\s*)?date\s*of\s*birth"),
                     re.compile(r"ngay\s*sinh"),
@@ -448,7 +536,7 @@ class VisaFormAnchorExtractor:
             },
             "place_of_birth": {
                 "col": "left",
-                "y_range": (200, 310),
+                "y_range": (245, 310),
                 "patterns": [
                     re.compile(r"(?:3\s*[\.\)]?\s*)?place\s*of\s*birth"),
                     re.compile(r"noi\s*sinh"),
@@ -457,7 +545,7 @@ class VisaFormAnchorExtractor:
             },
             "gender": {
                 "col": "left",
-                "y_range": (235, 345),
+                "y_range": (280, 345),
                 "patterns": [
                     re.compile(r"(?:4\s*[\.\)]?\s*)?gender"),
                     re.compile(r"gioi\s*tinh"),
@@ -467,7 +555,7 @@ class VisaFormAnchorExtractor:
             },
             "nationality": {
                 "col": "left",
-                "y_range": (270, 380),
+                "y_range": (315, 380),
                 "patterns": [
                     re.compile(r"(?:5\s*[\.\)]?\s*)?nationality"),
                     re.compile(r"quoc\s*tich"),
@@ -476,7 +564,7 @@ class VisaFormAnchorExtractor:
             },
             "contact_address": {
                 "col": "left",
-                "y_range": (self.section6_ny or 340, (self.section7_ny or 480) - 40),
+                "y_range": (self.section6_ny or 375, (self.section7_ny or 495) - 40),
                 "patterns": [
                     re.compile(r"address"),
                     re.compile(r"dia\s*chi"),
@@ -484,7 +572,7 @@ class VisaFormAnchorExtractor:
             },
             "contact_phone": {
                 "col": "left",
-                "y_range": ((self.section6_ny or 340) + 15, (self.section7_ny or 480) - 15),
+                "y_range": ((self.section6_ny or 375) + 30, (self.section7_ny or 495) - 10),
                 "patterns": [
                     re.compile(r"telephone"),
                     re.compile(r"dien\s*thoai"),
@@ -494,14 +582,14 @@ class VisaFormAnchorExtractor:
             },
             "contact_email": {
                 "col": "left",
-                "y_range": ((self.section6_ny or 340) + 35, (self.section7_ny or 480)),
+                "y_range": ((self.section6_ny or 375) + 60, (self.section7_ny or 495) + 15),
                 "patterns": [
                     re.compile(r"email"),
                 ],
             },
             "sponsor_name": {
                 "col": "left",
-                "y_range": (self.section7_ny or 480, 560),
+                "y_range": (self.section7_ny or 495, 575),
                 "patterns": [
                     re.compile(r"name"),
                     re.compile(r"ten"),
@@ -509,7 +597,7 @@ class VisaFormAnchorExtractor:
             },
             "sponsor_phone": {
                 "col": "left",
-                "y_range": ((self.section7_ny or 480) + 15, 620),
+                "y_range": ((self.section7_ny or 495) + 30, 625),
                 "patterns": [
                     re.compile(r"telephone"),
                     re.compile(r"dien\s*thoai"),
@@ -518,7 +606,7 @@ class VisaFormAnchorExtractor:
             },
             "passport_number": {
                 "col": "right",
-                "y_range": (150, 275),
+                "y_range": (205, 275),
                 "patterns": [
                     re.compile(r"(?:8\s*[\.\)]?\s*)?passport\s*number"),
                     re.compile(r"so\s*ho\s*chieu"),
@@ -527,7 +615,7 @@ class VisaFormAnchorExtractor:
             },
             "passport_expiration": {
                 "col": "right",
-                "y_range": (200, 310),
+                "y_range": (245, 310),
                 "patterns": [
                     re.compile(r"date\s*of\s*expiry"),
                     re.compile(r"ngay\s*het\s*han"),
@@ -538,7 +626,7 @@ class VisaFormAnchorExtractor:
             },
             "number_of_entries": {
                 "col": "right",
-                "y_range": (235, 345),
+                "y_range": (280, 345),
                 "patterns": [
                     re.compile(r"(?:9\s*[\.\)]?\s*)?number\s*of\s*entries"),
                     re.compile(r"so\s*lan\s*nhap\s*canh"),
@@ -547,7 +635,7 @@ class VisaFormAnchorExtractor:
             },
             "entry_date": {
                 "col": "right",
-                "y_range": (270, 380),
+                "y_range": (315, 380),
                 "patterns": [
                     re.compile(r"(?:10\s*[\.\)]?\s*)?proposed\s*date\s*of\s*entry"),
                     re.compile(r"ngay\s*du\s*kien\s*nhap\s*canh"),
@@ -557,7 +645,7 @@ class VisaFormAnchorExtractor:
             },
             "exit_date": {
                 "col": "right",
-                "y_range": (310, 415),
+                "y_range": (350, 415),
                 "patterns": [
                     re.compile(r"(?:11\s*[\.\)]?\s*)?proposed\s*date\s*of\s*exit"),
                     re.compile(r"ngay\s*du\s*kien\s*xuat\s*canh"),
@@ -567,7 +655,7 @@ class VisaFormAnchorExtractor:
             },
             "submission_place": {
                 "col": "right",
-                "y_range": (350, 460),
+                "y_range": (385, 465),
                 "patterns": [
                     re.compile(r"(?:12\s*[\.\)]?\s*)?place\s*of\s*visa\s*submission"),
                     re.compile(r"noi\s*nop\s*ho\s*so"),
@@ -576,7 +664,7 @@ class VisaFormAnchorExtractor:
             },
             "collection_place": {
                 "col": "right",
-                "y_range": (420, 525),
+                "y_range": (455, 535),
                 "patterns": [
                     re.compile(r"(?:13\s*[\.\)]?\s*)?place\s*of\s*visa\s*collection"),
                     re.compile(r"noi\s*nhan\s*thi\s*thuc"),
@@ -585,7 +673,7 @@ class VisaFormAnchorExtractor:
             },
             "purpose_of_entry": {
                 "col": "right",
-                "y_range": (470, 600),
+                "y_range": (515, 620),
                 "patterns": [
                     re.compile(r"(?:14\s*[\.\)]?\s*)?purpose\s*of\s*entry"),
                     re.compile(r"muc\s*dich\s*nhap\s*canh"),
@@ -593,7 +681,7 @@ class VisaFormAnchorExtractor:
             },
             "application_date": {
                 "col": "right",
-                "y_range": (620, 850),
+                "y_range": (670, 800),
                 "patterns": [
                     re.compile(r"date\s*[\/\:]?\s*ngay"),
                     re.compile(r"date"),
@@ -659,6 +747,12 @@ class VisaFormAnchorExtractor:
                             anchor_indices.add(idx)
 
             if not anchor_indices:
+                # Also check if any single token was pre-flagged as anchor matching patterns
+                for i, tok in enumerate(col_tokens):
+                    if tok.is_anchor and any(p.search(tok.clean_text) for p in patterns):
+                        anchor_indices.add(i)
+
+            if not anchor_indices:
                 continue
 
             # Pass 2: Absorb date format hints like (DD/MM/YYYY) adjacent to anchor
@@ -685,6 +779,11 @@ class VisaFormAnchorExtractor:
         if not anchor_tokens:
             return None
 
+        # Determine primary line tokens (the topmost line of the anchor)
+        min_line_y = min(t.ny_center for t in anchor_tokens)
+        primary_tokens = [t for t in anchor_tokens if abs(t.ny_center - min_line_y) <= 8]
+        primary_nx2 = max(t.nx2 for t in primary_tokens)
+
         nx1 = min(t.nx1 for t in anchor_tokens)
         ny1 = min(t.ny1 for t in anchor_tokens)
         nx2 = max(t.nx2 for t in anchor_tokens)
@@ -695,6 +794,7 @@ class VisaFormAnchorExtractor:
             ny1=ny1,
             nx2=nx2,
             ny2=ny2,
+            primary_nx2=primary_nx2,
             tokens=anchor_tokens,
         )
 
@@ -721,7 +821,6 @@ class VisaFormAnchorExtractor:
                 return 1.0, shift_x, 1.0, shift_y
             return 1.0, 0.0, 1.0, 0.0
 
-        # Linear regression for scale and shift
         base_y_mean = sum(p[0] for p in pairs_y) / len(pairs_y)
         det_y_mean = sum(p[1] for p in pairs_y) / len(pairs_y)
 
@@ -729,7 +828,7 @@ class VisaFormAnchorExtractor:
         den = sum((p[0] - base_y_mean) ** 2 for p in pairs_y)
 
         scale_y = (num / den) if den > 1e-4 else 1.0
-        scale_y = max(0.80, min(1.25, scale_y))
+        scale_y = max(0.85, min(1.20, scale_y))
         shift_y = det_y_mean - scale_y * base_y_mean
 
         base_x_mean = sum(p[0] for p in pairs_x) / len(pairs_x)
@@ -750,7 +849,7 @@ class VisaFormAnchorExtractor:
     ) -> ExtractedFieldResult:
         field_type = meta["field_type"]
         is_right = meta["column"] == "right"
-        col_left_bound = 500 if is_right else 50
+        col_left_bound = 480 if is_right else 50
         col_right_bound = 980 if is_right else 485
 
         anchor = self.detected_anchors.get(code)
@@ -759,6 +858,7 @@ class VisaFormAnchorExtractor:
         if anchor:
             ax1, ay1, ax2, ay2 = anchor.nx1, anchor.ny1, anchor.nx2, anchor.ny2
             anchor_bbox = (ax1, ay1, ax2, ay2)
+            primary_nx2 = anchor.primary_nx2 or ax2
         else:
             base_anc = meta["baseline_anchor"]
             ax1 = int(round(base_anc[0] * scale_x + shift_x))
@@ -766,6 +866,7 @@ class VisaFormAnchorExtractor:
             ax2 = int(round(base_anc[2] * scale_x + shift_x))
             ay2 = int(round(base_anc[3] * scale_y + shift_y))
             anchor_bbox = None
+            primary_nx2 = ax2
 
         next_anchor_top = self._find_next_anchor_top(
             current_code=code,
@@ -782,6 +883,8 @@ class VisaFormAnchorExtractor:
                 ay1=ay1,
                 ax2=ax2,
                 ay2=ay2,
+                primary_nx2=primary_nx2,
+                col_left=col_left_bound,
                 col_right=col_right_bound,
                 next_anchor_top=next_anchor_top,
                 anchor_found=anchor_found,
@@ -829,28 +932,59 @@ class VisaFormAnchorExtractor:
         ay1: int,
         ax2: int,
         ay2: int,
+        primary_nx2: int,
+        col_left: int,
         col_right: int,
         next_anchor_top: int,
         anchor_found: bool,
         anchor_bbox: tuple[int, int, int, int] | None,
     ) -> ExtractedFieldResult:
-        h = max(14, ay2 - ay1)
-        y_search_min = max(0, ay1 - 6)
-        y_search_max = min(next_anchor_top - 2, ay2 + 5)
-        x_search_min = max(ax1 + 5, ax2 - 5)
-
+        is_right = meta["column"] == "right"
+        anchor = self.detected_anchors.get(code)
         val_tokens: list[ExtractedToken] = []
+
+        # Find the line containing the primary anchor
+        target_ny = ay1 + 10
+        if anchor and anchor.tokens:
+            target_ny = min(t.ny_center for t in anchor.tokens)
+
+        # 1. Search for value tokens on that primary line
+        search_x_min = primary_nx2 - 2
         for t in self.tokens:
             if t.is_anchor:
                 continue
-            if t.nx_center >= x_search_min and t.nx2 <= col_right + 15:
-                if t.ny1 < next_anchor_top - 1:
-                    if t.ny1 >= y_search_min - 4 and t.ny2 <= y_search_max + 4:
-                        val_tokens.append(t)
-                    elif abs(t.ny_center - (ay1 + ay2) / 2.0) <= max(10, h * 0.50):
-                        val_tokens.append(t)
+            if is_right:
+                if t.nx1 < col_left - 10:
+                    continue
+            else:
+                if t.nx2 > col_right + 10:
+                    continue
+
+            # Check if on same line (within 12 normalized units vertically)
+            if abs(t.ny_center - target_ny) <= 12 and t.nx_center >= search_x_min and t.ny1 >= ay1 - 4:
+                if t.ny1 < next_anchor_top - 2:
+                    val_tokens.append(t)
 
         val_tokens.sort(key=lambda t: t.nx1)
+
+        # Filter out format hints if any slipped through
+        val_tokens = [t for t in val_tokens if not FORMAT_HINT_PAT.fullmatch(t.text.strip())]
+
+        # Special handling for gender if no token found on same line
+        if code == "gender" and not val_tokens:
+            for t in self.tokens:
+                if not t.is_anchor and t.nx2 <= col_right and abs(t.ny_center - target_ny) <= 15:
+                    if t.clean_text in ("male", "female", "nam", "nu", "m", "f"):
+                        val_tokens = [t]
+                        break
+
+        # Special handling for application_date if not found
+        if code == "application_date" and not val_tokens:
+            for t in self.tokens:
+                if not t.is_anchor and t.nx1 >= col_left and abs(t.ny_center - target_ny) <= 15:
+                    if re.search(r"\d{1,2}[\/\.\-]\d{1,2}[\/\.\-]\d{4}", t.text):
+                        val_tokens = [t]
+                        break
 
         if val_tokens:
             nx1 = max(0, min(t.nx1 for t in val_tokens) - 4)
@@ -858,11 +992,21 @@ class VisaFormAnchorExtractor:
             nx2 = min(1000, max(t.nx2 for t in val_tokens) + 4)
             ny2 = min(1000, max(t.ny2 for t in val_tokens) + 3)
             value_text = " ".join(t.text for t in val_tokens).strip() or None
+            # Strip trailing format hints from value_text
+            if value_text:
+                value_text = FORMAT_HINT_PAT.sub("", value_text).strip() or None
         else:
-            nx1 = min(col_right - 40, ax2 + 8)
-            nx2 = min(col_right, nx1 + 220)
-            ny1 = ay1
-            ny2 = ay2
+            # Blank or missing field: synthesized tight bounding box
+            if code in ("sponsor_name", "sponsor_phone"):
+                nx1 = min(col_right - 40, primary_nx2 + 8)
+                nx2 = min(col_right, nx1 + 220)
+                ny1 = ay1
+                ny2 = min(ay2 + 10, next_anchor_top - 5)
+            else:
+                nx1 = min(col_right - 40, primary_nx2 + 8)
+                nx2 = min(col_right, nx1 + 200)
+                ny1 = ay1
+                ny2 = ay2
             value_text = None
 
         nx1, ny1, nx2, ny2 = self._clamp_norm_box(nx1, ny1, nx2, ny2)
@@ -894,13 +1038,37 @@ class VisaFormAnchorExtractor:
         anchor_bbox: tuple[int, int, int, int] | None,
     ) -> ExtractedFieldResult:
         val_tokens: list[ExtractedToken] = []
+        is_right = meta["column"] == "right"
+
+        # Explicit block boundaries and stops
+        stop_keywords = ("statement", "trach nhiem", "knowledge", "phap luat", "checklist", "truoc")
         for t in self.tokens:
             if t.is_anchor:
                 continue
-            if t.nx1 >= col_left - 15 and t.nx2 <= col_right + 15:
-                if t.ny1 < next_anchor_top - 1:
-                    if (t.ny1 >= ay1 - 5 and t.nx1 >= ax2 - 5) or (t.ny1 >= ay2 - 5):
-                        val_tokens.append(t)
+
+            # Column filter
+            if is_right:
+                if t.nx1 < col_left - 15:
+                    continue
+            else:
+                if t.nx2 > col_right + 15:
+                    continue
+
+            # Legal declaration stop condition for purpose_of_entry
+            if code == "purpose_of_entry":
+                if any(kw in t.clean_text for kw in stop_keywords) or t.ny1 >= 640:
+                    continue
+
+            # Exclude Vietnamese sublabels for contact_address
+            if code == "contact_address":
+                if "dia chi" in t.clean_text or "dja chi" in t.clean_text:
+                    continue
+
+            # Vertical range
+            if t.ny1 >= ay1 - 4 and t.ny_center < next_anchor_top - 4:
+                # Include tokens on anchor line if to the right of anchor, or any token below anchor line
+                if (t.ny1 >= ay1 - 4 and t.nx1 >= ax2 - 5) or (t.ny1 >= ay2 - 5):
+                    val_tokens.append(t)
 
         val_tokens.sort(key=lambda t: (t.ny1, t.nx1))
 
@@ -911,10 +1079,10 @@ class VisaFormAnchorExtractor:
             ny2 = min(1000, max(t.ny2 for t in val_tokens) + 3)
             value_text = " ".join(t.text for t in val_tokens).strip() or None
         else:
-            nx1 = col_left
-            nx2 = col_right
+            nx1 = col_left + 10
+            nx2 = min(col_right, nx1 + 250)
             ny1 = ay2 + 5
-            ny2 = min(next_anchor_top - 5, ny1 + 45)
+            ny2 = min(next_anchor_top - 5, ny1 + 35)
             value_text = None
 
         nx1, ny1, nx2, ny2 = self._clamp_norm_box(nx1, ny1, nx2, ny2)

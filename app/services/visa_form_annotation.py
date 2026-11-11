@@ -140,6 +140,19 @@ class VisaFormAnnotationService:
                 )
             if page_id:
                 statement = statement.where(AnnotationPage.id == page_id)
+
+            # Never re-seed or touch pages that have already been human-approved (REVIEWED)
+            reviewed_exists = (
+                select(VisaFormAnnotation.id)
+                .where(
+                    VisaFormAnnotation.page_id == AnnotationPage.id,
+                    VisaFormAnnotation.is_active == true(),
+                    VisaFormAnnotation.status == VisaFormAnnotationStatus.REVIEWED.value,
+                )
+                .exists()
+            )
+            statement = statement.where(~reviewed_exists)
+
             if not replace_existing:
                 active_exists = (
                     select(VisaFormAnnotation.id)
@@ -181,6 +194,10 @@ class VisaFormAnnotationService:
                     VisaFormAnnotation.is_active == true(),
                 )
             )
+            if active is not None and active.status == VisaFormAnnotationStatus.REVIEWED.value:
+                raise VisaFormAnnotationConflictError(
+                    "Cannot replace a human-approved (REVIEWED) visa-form annotation."
+                )
             if active is not None and not replace_existing:
                 raise VisaFormAnnotationConflictError(
                     "An active visa-form annotation already exists for this page."

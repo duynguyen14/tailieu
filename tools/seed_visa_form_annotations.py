@@ -14,6 +14,7 @@ from app.services.storage import AnnotationStorage
 from app.services.visa_form_annotation import (
     DEFAULT_TEMPLATE_VERSION,
     VISA_FORM_TEMPLATE_FIELDS,
+    VisaFormAnnotationConflictError,
     VisaFormAnnotationService,
 )
 
@@ -105,14 +106,17 @@ def main() -> None:
                 f"values_extracted={values_extracted}/{len(fields)}"
             )
             if args.execute:
-                service.create_template_annotation(
-                    page_id=page.id,
-                    template_version=args.template_version,
-                    replace_existing=args.replace_existing,
-                    use_ocr=args.use_ocr,
-                    run_ocr_if_missing=args.run_ocr_if_missing,
-                )
-                created += 1
+                try:
+                    service.create_template_annotation(
+                        page_id=page.id,
+                        template_version=args.template_version,
+                        replace_existing=args.replace_existing,
+                        use_ocr=args.use_ocr,
+                        run_ocr_if_missing=args.run_ocr_if_missing,
+                    )
+                    created += 1
+                except VisaFormAnnotationConflictError as exc:
+                    print(f"    [SKIP] page={page.id} conflict: {exc}")
     finally:
         database.close()
 
