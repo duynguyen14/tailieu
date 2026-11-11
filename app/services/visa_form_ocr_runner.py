@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -15,6 +15,27 @@ from app.db.models import AnnotationPage, OcrRun, OcrToken, utc_now
 from app.services.storage import AnnotationStorage
 
 LOGGER = logging.getLogger(__name__)
+
+_ENGINE_LOCK = threading.Lock()
+_CACHED_ENGINE: Any = None
+
+
+def get_ocr_engine(settings: Settings) -> Any:
+    global _CACHED_ENGINE
+    if _CACHED_ENGINE is not None:
+        return _CACHED_ENGINE
+    with _ENGINE_LOCK:
+        if _CACHED_ENGINE is not None:
+            return _CACHED_ENGINE
+        if settings.ocr_engine == OcrEngineKind.TESSERACT:
+            from app.models.tesseract_ocr_engine import TesseractOcrEngine
+
+            _CACHED_ENGINE = TesseractOcrEngine(settings)
+        else:
+            from app.models.paddle_ocr_engine import PaddleOcrEngine
+
+            _CACHED_ENGINE = PaddleOcrEngine(settings)
+        return _CACHED_ENGINE
 
 
 def get_existing_page_tokens(
@@ -42,7 +63,6 @@ def get_existing_page_tokens(
                 .order_by(OcrToken.token_index.asc())
             ).all()
         )
-        # Detach/keep tokens data
         return tokens
 
 
@@ -58,7 +78,7 @@ def run_ocr_for_page(
     """Retrieves or executes OCR for an annotation page.
 
     1. Checks if an active completed OcrRun already exists in the database.
-    2. If not found (or force_rerun=True), executes PaddleOCR or Tesseract on the page image.
+    2. If not found (or force_rerun=True), executes PaddleOCR or Tesseract directly on the page image.
     3. Persists the OcrRun and OcrTokens to the database for future runs.
     4. Falls back gracefully to an empty token list if OCR runtime is unavailable.
     """
@@ -70,21 +90,14 @@ def run_ocr_for_page(
         if existing:
             return existing
 
-    # Step 2: Initialize OCR engine
+    # Step 2: Initialize OCR engine (cached singleton)
     try:
-        if settings.ocr_engine == OcrEngineKind.TESSERACT:
-            from app.models.tesseract_ocr_engine import TesseractOcrEngine
-
-            engine: Any = TesseractOcrEngine(settings)
-        else:
-            from app.models.paddle_ocr_engine import PaddleOcrEngine
-
-            engine = PaddleOcrEngine(settings)
+        engine = get_ocr_engine(settings)
     except Exception as exc:
         LOGGER.warning("OCR engine initialization failed for page %s: %s", page.id, exc)
         return []
 
-    # Step 3: Run OCR prediction on the image
+    # Step 3: Run OCR prediction directly on the resolved image path
     image_path = storage.resolve(page.image_relative_path)
     if not image_path.exists():
         LOGGER.warning("Page image file does not exist: %s", image_path)
@@ -92,22 +105,7 @@ def run_ocr_for_page(
 
     start_time = time.perf_counter()
     try:
-        from app.models.ocr_preprocessing import load_rgb_image, prepare_ocr_image
-
-        source_img = load_rgb_image(image_path)
-        with tempfile.TemporaryDirectory(prefix="visa-ocr-") as tmp_dir:
-            prepared = prepare_ocr_image(
-                source_img,
-                rotation=0,
-                scale=1.0,
-                enable_content_crop=False,
-            )
-            candidate_path = Path(tmp_dir) / "page.png"
-            prepared.image.save(candidate_path, format="PNG")
-            prepared.image.close()
-            source_img.close()
-
-            predicted_tokens = engine.predict(candidate_path)
+        predicted_tokens = engine.predict(image_path)
     except Exception as exc:
         LOGGER.warning("OCR prediction failed for page %s: %s", page.id, exc)
         return []
