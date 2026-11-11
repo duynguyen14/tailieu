@@ -881,6 +881,94 @@ class TableStructureElement(Base):
     table_region: Mapped[TableRegion] = relationship(back_populates="elements")
 
 
+class VisaFormAnnotation(Base):
+    __tablename__ = "visa_form_annotations"
+    __table_args__ = (
+        CheckConstraint(
+            "source IN ('TEMPLATE', 'HUMAN')",
+            name="ck_visa_form_annotation_source",
+        ),
+        CheckConstraint(
+            "status IN ('PENDING', 'REVIEWED', 'REJECTED')",
+            name="ck_visa_form_annotation_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    page_id: Mapped[str] = mapped_column(
+        ForeignKey("annotation_pages.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    parent_annotation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("visa_form_annotations.id"), nullable=True
+    )
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    template_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    image_width: Mapped[int] = mapped_column(Integer, nullable=False)
+    image_height: Mapped[int] = mapped_column(Integer, nullable=False)
+    reviewed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    page: Mapped[AnnotationPage] = relationship()
+    fields: Mapped[list[VisaFormFieldAnnotation]] = relationship(
+        back_populates="annotation",
+        cascade="all, delete-orphan",
+        order_by="VisaFormFieldAnnotation.field_order",
+    )
+
+
+class VisaFormFieldAnnotation(Base):
+    __tablename__ = "visa_form_field_annotations"
+    __table_args__ = (
+        UniqueConstraint("annotation_id", "field_code", name="uq_visa_form_field_code"),
+        UniqueConstraint("annotation_id", "field_order", name="uq_visa_form_field_order"),
+        CheckConstraint("field_order >= 1", name="ck_visa_form_field_order"),
+        CheckConstraint(
+            "x1 >= 0 AND y1 >= 0 AND x2 > x1 AND y2 > y1",
+            name="ck_visa_form_field_bbox",
+        ),
+        CheckConstraint(
+            "nx1 >= 0 AND ny1 >= 0 AND nx2 <= 1000 AND ny2 <= 1000 "
+            "AND nx2 > nx1 AND ny2 > ny1",
+            name="ck_visa_form_field_normalized_bbox",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    annotation_id: Mapped[str] = mapped_column(
+        ForeignKey("visa_form_annotations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    field_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    field_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    value_text: Mapped[str | None] = mapped_column(Unicode(), nullable=True)
+    x1: Mapped[int] = mapped_column(Integer, nullable=False)
+    y1: Mapped[int] = mapped_column(Integer, nullable=False)
+    x2: Mapped[int] = mapped_column(Integer, nullable=False)
+    y2: Mapped[int] = mapped_column(Integer, nullable=False)
+    nx1: Mapped[int] = mapped_column(Integer, nullable=False)
+    ny1: Mapped[int] = mapped_column(Integer, nullable=False)
+    nx2: Mapped[int] = mapped_column(Integer, nullable=False)
+    ny2: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    annotation: Mapped[VisaFormAnnotation] = relationship(back_populates="fields")
+
+
 class KieAnnotationRun(Base):
     __tablename__ = "kie_annotation_runs"
     __table_args__ = (

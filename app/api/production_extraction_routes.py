@@ -11,7 +11,10 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from starlette.datastructures import UploadFile
 
-from app.schemas.production_extraction import ProductionReadinessResponse
+from app.schemas.production_extraction import (
+    ProductionExtractionResponse,
+    ProductionReadinessResponse,
+)
 from app.schemas.teacher_extraction import (
     TeacherBusinessApplicantV8,
     TeacherBusinessNoteV8,
@@ -181,12 +184,7 @@ def production_readiness(request: Request) -> ProductionReadinessResponse:
     return _service(request).readiness()
 
 
-@router.post("", response_model=TeacherBusinessOutputV8)
-async def create_document_extraction(
-    request: Request,
-) -> TeacherBusinessOutputV8 | Response:
-    if not _verify_api_key(request):
-        return Response(status_code=status.HTTP_401_UNAUTHORIZED)
+async def _run_extraction_pipeline(request: Request) -> ProductionExtractionResponse:
     service = _service(request)
     readiness = service.readiness()
     if not readiness.enabled:
@@ -217,34 +215,10 @@ async def create_document_extraction(
         with tempfile.TemporaryDirectory(prefix="production-upload-") as temp_dir:
             pdf_path = Path(temp_dir) / "input.pdf"
             pdf_path.write_bytes(pdf_bytes)
-            result = service.extract(
+            return service.extract(
                 pdf_path=pdf_path,
                 filename=filename,
                 sha256=sha256,
-            )
-            return TeacherBusinessOutputV8(
-                note=TeacherBusinessNoteV8(
-                    note_number=result.extraction.note.note_number,
-                    sender_organization=result.extraction.note.sender_organization,
-                    request_type_code=result.extraction.note.request_type_code,
-                ),
-                applicants=[
-                    TeacherBusinessApplicantV8(
-                        full_name=item.full_name,
-                        date_of_birth=item.date_of_birth,
-                        gender=item.gender,
-                        nationality=item.nationality,
-                        passport_number=item.passport_number,
-                        passport_type=item.passport_type,
-                        passport_issue_date=item.passport_issue_date,
-                        passport_expiration=item.passport_expiration,
-                        visa_type=item.visa_type,
-                        number_of_entries=item.number_of_entries,
-                        entry_date=item.entry_date,
-                        exit_date=item.exit_date,
-                    )
-                    for item in result.extraction.applicants
-                ],
             )
     except DocumentValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -255,5 +229,47 @@ async def create_document_extraction(
             else status.HTTP_502_BAD_GATEWAY
         )
         raise HTTPException(status_code=code, detail=str(exc)) from exc
+
+
+@router.post("", response_model=TeacherBusinessOutputV8)
+async def create_document_extraction(
+    request: Request,
+) -> TeacherBusinessOutputV8 | Response:
+    if not _verify_api_key(request):
+        return Response(status_code=status.HTTP_401_UNAUTHORIZED)
+    result = await _run_extraction_pipeline(request)
+    return TeacherBusinessOutputV8(
+        note=TeacherBusinessNoteV8(
+            note_number=result.extraction.note.note_number,
+            sender_organization=result.extraction.note.sender_organization,
+            request_type_code=result.extraction.note.request_type_code,
+        ),
+        applicants=[
+            TeacherBusinessApplicantV8(
+                full_name=item.full_name,
+                date_of_birth=item.date_of_birth,
+                gender=item.gender,
+                nationality=item.nationality,
+                passport_number=item.passport_number,
+                passport_type=item.passport_type,
+                passport_issue_date=item.passport_issue_date,
+                passport_expiration=item.passport_expiration,
+                visa_type=item.visa_type,
+                number_of_entries=item.number_of_entries,
+                entry_date=item.entry_date,
+                exit_date=item.exit_date,
+            )
+            for item in result.extraction.applicants
+        ],
+    )
+
+
+@router.post("/debug", response_model=ProductionExtractionResponse)
+async def create_document_extraction_debug(
+    request: Request,
+) -> ProductionExtractionResponse | Response:
+    if not _verify_api_key(request):
+        return Response(status_code=status.HTTP_401_UNAUTHORIZED)
+    return await _run_extraction_pipeline(request)
 
 

@@ -32,6 +32,7 @@ from app.db.models import (
     TeacherExtractionAttempt,
     TeacherExtractionJob,
     TeacherExtractionReview,
+    VisaFormAnnotation,
     utc_now,
 )
 from app.main import create_app
@@ -1854,4 +1855,77 @@ def test_table_annotation_prediction_and_human_review_flow() -> None:
             assert versions[0].source == "MODEL"
             assert versions[0].is_active is False
             assert versions[1].source == "HUMAN"
+            assert versions[1].is_active is True
+
+
+def test_visa_form_template_and_human_review_flow() -> None:
+    with _client() as client:
+        imported = client.post(
+            "/api/v1/annotation/documents",
+            files={"file": ("visa-form.pdf", _two_page_pdf(), "application/pdf")},
+        ).json()["document"]
+        document_id = imported["id"]
+        page_id = imported["pages"][0]["id"]
+        reviewed_page = client.put(
+            f"/api/v1/annotation/documents/{document_id}/pages/1/review",
+            json={"label": "VISA_APPLICATION_FORM", "reviewed_by": "page-reviewer"},
+        )
+        assert reviewed_page.status_code == 200
+
+        service = client.app.state.visa_form_annotation_service
+        annotation_id = service.create_template_annotation(page_id=page_id)
+
+        queued = client.get("/api/v1/visa-form-annotation/review/next")
+        assert queued.status_code == 200
+        payload = queued.json()
+        assert payload["current"]["annotation"]["id"] == annotation_id
+        assert payload["current"]["annotation"]["source"] == "TEMPLATE"
+        assert len(payload["current"]["fields"]) == 19
+        assert len({item["field_code"] for item in payload["current"]["fields"]}) == 19
+        assert payload["stats"] == {
+            "pending": 1,
+            "reviewed": 0,
+            "rejected": 0,
+            "total": 1,
+        }
+
+        fields = payload["current"]["fields"]
+        fields[0]["bbox"] = [40, 50, 180, 80]
+        reviewed = client.put(
+            f"/api/v1/visa-form-annotation/{annotation_id}/review",
+            json={
+                "reviewed_by": "thai",
+                "decision": "REVIEWED",
+                "review_note": "corrected full-name bbox",
+                "fields": fields,
+            },
+        )
+        assert reviewed.status_code == 200, reviewed.text
+        result = reviewed.json()
+        assert result["annotation"]["source"] == "HUMAN"
+        assert result["annotation"]["parent_annotation_id"] == annotation_id
+        assert result["fields"][0]["bbox"] == [40, 50, 180, 80]
+        width = result["page"]["width"]
+        height = result["page"]["height"]
+        assert result["fields"][0]["normalized_bbox"] == [
+            round(40 * 1000 / width),
+            round(50 * 1000 / height),
+            round(180 * 1000 / width),
+            round(80 * 1000 / height),
+        ]
+
+        complete = client.get("/api/v1/visa-form-annotation/review/next").json()
+        assert complete["current"] is None
+        assert complete["stats"]["reviewed"] == 1
+
+        with client.app.state.database.session() as session:
+            versions = list(
+                session.scalars(
+                    select(VisaFormAnnotation)
+                    .where(VisaFormAnnotation.page_id == page_id)
+                    .order_by(VisaFormAnnotation.created_at)
+                ).all()
+            )
+            assert len(versions) == 2
+            assert versions[0].is_active is False
             assert versions[1].is_active is True

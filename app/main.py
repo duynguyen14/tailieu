@@ -16,6 +16,7 @@ from app.api.routes import router
 from app.api.table_annotation_routes import router as table_annotation_router
 from app.api.teacher_extraction_routes import router as teacher_extraction_router
 from app.api.text_reconstruction_routes import router as text_reconstruction_router
+from app.api.visa_form_annotation_routes import router as visa_form_annotation_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.core.runtime import resolve_runtime
@@ -32,6 +33,7 @@ from app.services.storage import AnnotationStorage
 from app.services.table_annotation import TableAnnotationService
 from app.services.teacher_extraction_review import TeacherExtractionReviewService
 from app.services.text_reconstruction_review import TextReconstructionReviewService
+from app.services.visa_form_annotation import VisaFormAnnotationService
 
 LOGGER = logging.getLogger(__name__)
 
@@ -57,6 +59,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         max_file_size_bytes=settings.max_file_size_bytes,
     )
     table_annotation_service = TableAnnotationService(
+        database=database,
+        storage=annotation_storage,
+    )
+    visa_form_annotation_service = VisaFormAnnotationService(
         database=database,
         storage=annotation_storage,
     )
@@ -125,6 +131,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.annotation_storage = annotation_storage
     app.state.annotation_service = annotation_service
     app.state.table_annotation_service = table_annotation_service
+    app.state.visa_form_annotation_service = visa_form_annotation_service
     app.state.page_label_audit_service = page_label_audit_service
     app.state.ocr_review_service = ocr_review_service
     app.state.text_reconstruction_review_service = text_reconstruction_review_service
@@ -136,6 +143,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(page_label_audit_router, prefix=settings.api_prefix)
     app.include_router(ocr_review_router, prefix=settings.api_prefix)
     app.include_router(table_annotation_router, prefix=settings.api_prefix)
+    app.include_router(visa_form_annotation_router, prefix=settings.api_prefix)
     app.include_router(text_reconstruction_router, prefix=settings.api_prefix)
     app.include_router(teacher_extraction_router, prefix=settings.api_prefix)
     app.include_router(kie_review_router, prefix=settings.api_prefix)

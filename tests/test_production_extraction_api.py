@@ -191,6 +191,12 @@ def test_production_endpoint_accepts_file_and_base64_and_returns_clean_business_
             },
         )
 
+        debug_resp = client.post(
+            "/api/v1/document-extractions/debug",
+            headers=headers,
+            files={"file": ("scan.pdf", b"%PDF-1.4 file content", "application/pdf")},
+        )
+
     expected_clean_json = {
         "note": {
             "note_number": "479/2025",
@@ -218,6 +224,15 @@ def test_production_endpoint_accepts_file_and_base64_and_returns_clean_business_
     assert file_resp.json() == expected_clean_json
     assert json_resp.status_code == 200
     assert json_resp.json() == expected_clean_json
+
+    assert debug_resp.status_code == 200
+    debug_json = debug_resp.json()
+    assert debug_json["request_id"] == "req-1"
+    assert "timings" in debug_json
+    assert "pages" in debug_json
+    assert debug_json["timings"]["render_ms"] == 1.0
+    assert debug_json["extraction"]["note"]["note_number"] == "479/2025"
+    assert len(debug_json["extraction"]["applicants"]) == 1
 
 
 def test_student_runtime_normalizes_non_iso_dates_and_repairs_truncated_json() -> None:
