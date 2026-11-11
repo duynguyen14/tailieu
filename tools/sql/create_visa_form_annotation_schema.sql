@@ -13,9 +13,9 @@ IF OBJECT_ID(N'dbo.visa_form_annotations', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.visa_form_annotations
     (
-        id                   NVARCHAR(36)  NOT NULL,
-        page_id              NVARCHAR(36)  NOT NULL,
-        parent_annotation_id NVARCHAR(36)  NULL,
+        id                   VARCHAR(36)   NOT NULL,
+        page_id              VARCHAR(36)   NOT NULL,
+        parent_annotation_id VARCHAR(36)   NULL,
         source               NVARCHAR(16)  NOT NULL,
         status               NVARCHAR(20)  NOT NULL,
         template_version     NVARCHAR(100) NOT NULL,
@@ -50,8 +50,8 @@ IF OBJECT_ID(N'dbo.visa_form_field_annotations', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.visa_form_field_annotations
     (
-        id            NVARCHAR(36) NOT NULL,
-        annotation_id NVARCHAR(36) NOT NULL,
+        id            VARCHAR(36) NOT NULL,
+        annotation_id VARCHAR(36) NOT NULL,
         field_code    NVARCHAR(64) NOT NULL,
         field_order   INT NOT NULL,
         value_text    NVARCHAR(MAX) NULL,
