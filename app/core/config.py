@@ -255,6 +255,8 @@ class Settings(BaseSettings):
     production_ocr_enable_small_text_upscale: bool = False
     production_ocr_enable_refinement: bool = False
     production_include_reconstructed_text: bool = False
+    production_catalog_mapping_enabled: bool = True
+    production_catalog_path: Path = Path("config/business_catalog.v1.json")
 
     pdf_dpi: int = Field(default=250, ge=72, le=400)
     max_file_size_mb: int = Field(default=30, ge=1, le=500)

@@ -1,0 +1,47 @@
+{
+  "version": "business-catalog-v1",
+  "catalogs": {
+    "gender": {
+      "on_unmapped": "null",
+      "items": [
+        {"canonical": "Male", "aliases": ["M", "Male", "Nam", "Mr", "Ông"]},
+        {"canonical": "Female", "aliases": ["F", "Female", "Nữ", "Ms", "Mrs", "Bà"]}
+      ]
+    },
+    "passport_type": {
+      "on_unmapped": "null",
+      "items": [
+        {"canonical": "Ordinary", "aliases": ["Ordinary", "Phổ thông", "P"]},
+        {"canonical": "Diplomatic", "aliases": ["Diplomatic", "Ngoại giao", "D"]},
+        {"canonical": "Official", "aliases": ["Official", "Công vụ", "O"]},
+        {"canonical": "Service", "aliases": ["Service", "S"]}
+      ]
+    },
+    "number_of_entries": {
+      "on_unmapped": "null",
+      "items": [
+        {"canonical": "SINGLE", "aliases": ["SINGLE", "Single entry", "Một lần", "1", "01"]},
+        {"canonical": "MULTIPLE", "aliases": ["MULTIPLE", "Multiple entry", "Multiple entries", "Nhiều lần", "Nhiều"]}
+      ]
+    },
+    "visa_type": {
+      "on_unmapped": "null",
+      "canonical_pattern": "^NG[0-9]+[A-Z]?$",
+      "compact_uppercase": true,
+      "items": [
+        {"canonical": "NG1", "aliases": ["NG1", "Thị thực NG1", "Visa NG1"]},
+        {"canonical": "NG2", "aliases": ["NG2", "Thị thực NG2", "Visa NG2"]},
+        {"canonical": "NG3", "aliases": ["NG3", "Thị thực NG3", "Visa NG3"]},
+        {"canonical": "NG4", "aliases": ["NG4", "Thị thực NG4", "Visa NG4"]}
+      ]
+    },
+    "nationality": {
+      "on_unmapped": "preserve",
+      "items": []
+    },
+    "sender_organization": {
+      "on_unmapped": "preserve",
+      "items": []
+    }
+  }
+}

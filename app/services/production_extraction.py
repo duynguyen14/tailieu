@@ -16,6 +16,7 @@ from app.core.config import DevicePreference, Settings
 from app.domain.types import RenderedPage
 from app.schemas.production_extraction import (
     ProductionExtractionResponse,
+    ProductionCatalogMappingReport,
     ProductionModelStatus,
     ProductionOcrResponse,
     ProductionPageClassificationResponse,
@@ -1020,6 +1021,37 @@ class ProductionExtractionService:
         self._student: _StudentRuntime | None = None
         self._http_client: httpx.Client | None = None
         self._models: list[ProductionModelStatus] = []
+        from app.services.business_catalog import BusinessCatalogMapper
+
+        self._catalog_mapper = BusinessCatalogMapper.from_settings(settings)
+
+    def _map_business_catalogs(
+        self, compact_output: dict[str, Any]
+    ) -> tuple[dict[str, Any], ProductionCatalogMappingReport, list[str]]:
+        mapped_output, decisions = self._catalog_mapper.map_student_target(compact_output)
+        unmapped = [
+            decision
+            for decision in decisions
+            if decision.status == "UNMAPPED"
+            and decision.raw_value is not None
+            and decision.canonical_value is None
+        ]
+        warnings = [
+            "Catalog mapping could not normalize "
+            f"{decision.field}={decision.raw_value!r}"
+            + (
+                f" for applicant {decision.applicant_index}."
+                if decision.applicant_index is not None
+                else "."
+            )
+            for decision in unmapped
+        ]
+        report = ProductionCatalogMappingReport(
+            catalog_version=self._catalog_mapper.version,
+            entries=[decision.as_dict() for decision in decisions],
+            unmapped_count=len(unmapped),
+        )
+        return mapped_output, report, warnings
 
     def initialize(self) -> None:
         if not self.settings.production_extraction_enabled or self._ready:
@@ -1370,8 +1402,11 @@ class ProductionExtractionService:
             extraction_ms,
         )
         compact_output = _StudentRuntime._normalize_target(compact_output)
+        mapped_output, catalog_mapping, catalog_warnings = self._map_business_catalogs(
+            compact_output
+        )
         extraction = student_target_to_compact_document(
-            compact_output,
+            mapped_output,
             case_id=request_id,
             document_id=request_id,
         )
@@ -1391,6 +1426,8 @@ class ProductionExtractionService:
             page_count=ocr_result.page_count,
             extraction=extraction,
             compact_model_output=compact_output,
+            catalog_mapped_output=mapped_output,
+            catalog_mapping=catalog_mapping,
             reconstructed_text=(
                 ocr_result.reconstructed_text
                 if self.settings.production_include_reconstructed_text
@@ -1406,7 +1443,7 @@ class ProductionExtractionService:
                 extraction_ms=round(extraction_ms, 3),
                 total_ms=round(total_ms, 3),
             ),
-            warnings=ocr_result.warnings,
+            warnings=list(dict.fromkeys([*ocr_result.warnings, *catalog_warnings])),
         )
 
     def _extract_locked(
@@ -1569,8 +1606,11 @@ class ProductionExtractionService:
                 reconstructed_text
             )
             compact_output = _StudentRuntime._normalize_target(compact_output)
+            mapped_output, catalog_mapping, catalog_warnings = self._map_business_catalogs(
+                compact_output
+            )
             extraction = student_target_to_compact_document(
-                compact_output,
+                mapped_output,
                 case_id=request_id,
                 document_id=request_id,
             )
@@ -1586,6 +1626,8 @@ class ProductionExtractionService:
             page_count=len(rendered),
             extraction=extraction,
             compact_model_output=compact_output,
+            catalog_mapped_output=mapped_output,
+            catalog_mapping=catalog_mapping,
             reconstructed_text=(
                 reconstructed_text
                 if self.settings.production_include_reconstructed_text
@@ -1601,7 +1643,7 @@ class ProductionExtractionService:
                 extraction_ms=round(extraction_ms, 3),
                 total_ms=round(total_ms, 3),
             ),
-            warnings=list(dict.fromkeys(warnings)),
+            warnings=list(dict.fromkeys([*warnings, *catalog_warnings])),
         )
 
     def _orient_pages(

@@ -99,6 +99,20 @@ class ProductionPageClassificationResponse(BaseModel):
     timings: ProductionPageClassificationTiming
 
 
+class ProductionCatalogMappingEntry(BaseModel):
+    field: str
+    applicant_index: int | None = None
+    raw_value: str | None = None
+    canonical_value: str | None = None
+    status: str
+
+
+class ProductionCatalogMappingReport(BaseModel):
+    catalog_version: str
+    entries: list[ProductionCatalogMappingEntry] = Field(default_factory=list)
+    unmapped_count: int = Field(default=0, ge=0)
+
+
 class ProductionExtractionResponse(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
 
@@ -108,6 +122,8 @@ class ProductionExtractionResponse(BaseModel):
     page_count: int = Field(ge=1)
     extraction: CompactDocumentExtraction
     compact_model_output: dict[str, Any]
+    catalog_mapped_output: dict[str, Any] | None = None
+    catalog_mapping: ProductionCatalogMappingReport | None = None
     reconstructed_text: str | None = None
     pages: list[ProductionPageResult]
     timings: ProductionTiming
