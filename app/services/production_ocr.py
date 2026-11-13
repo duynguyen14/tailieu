@@ -272,21 +272,30 @@ class ProductionOcrService:
             or self._passport_executor is None
         ):
             return None
-        from app.models.ocr_preprocessing import png_bytes
-
-        payload = PassportMrzBatchRequest(
-            request_id=request_id,
-            pages=[
-                PassportMrzPageInput(
-                    page_number=page.page_number,
-                    image_base64=base64.b64encode(
-                        page.image_bytes or png_bytes(page.image)
-                    ).decode("ascii"),
-                )
-                for page in pages
-            ],
+        return self._passport_executor.submit(
+            self._encode_and_read_passport_pages, pages, request_id
         )
-        return self._passport_executor.submit(self._read_passport_pages, payload)
+
+    def _encode_and_read_passport_pages(
+        self,
+        pages: list[_PreparedPage],
+        request_id: str,
+    ) -> PassportMrzBatchResponse:
+        import io
+
+        page_inputs: list[PassportMrzPageInput] = []
+        for page in pages:
+            if page.image_bytes:
+                b64 = base64.b64encode(page.image_bytes).decode("ascii")
+            else:
+                buf = io.BytesIO()
+                page.image.convert("RGB").save(buf, format="JPEG", quality=95)
+                b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+            page_inputs.append(
+                PassportMrzPageInput(page_number=page.page_number, image_base64=b64)
+            )
+        payload = PassportMrzBatchRequest(request_id=request_id, pages=page_inputs)
+        return self._read_passport_pages(payload)
 
     def _read_passport_pages(
         self, payload: PassportMrzBatchRequest

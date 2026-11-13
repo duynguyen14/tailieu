@@ -38,8 +38,14 @@ class OnnxMrzDetector:
         else:
             providers = ["CPUExecutionProvider"]
             self.device = "cpu"
+        sess_options = ort.SessionOptions()
+        sess_options.intra_op_num_threads = min(4, max(1, settings.passport_mrz_ocr_cpu_threads))
+        sess_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         started = time.perf_counter()
-        self.session = ort.InferenceSession(str(model_path), providers=providers)
+        self.session = ort.InferenceSession(
+            str(model_path), sess_options=sess_options, providers=providers
+        )
         self.load_ms = (time.perf_counter() - started) * 1000
         self.model_path = model_path
         self.input_name = self.session.get_inputs()[0].name
@@ -59,9 +65,7 @@ class OnnxMrzDetector:
         started = time.perf_counter()
         height, width = image.shape[:2]
         best = self._detect_once(image, 0, width, height)
-        if self.rotation_fallback and (
-            best is None or best.confidence < self.rotation_min_confidence
-        ):
+        if self.rotation_fallback and best is None:
             for angle, candidate_image in (
                 (90, np.ascontiguousarray(np.rot90(image, 1))),
                 (180, np.ascontiguousarray(np.rot90(image, 2))),
