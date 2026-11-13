@@ -198,25 +198,26 @@ def test_production_endpoint_accepts_file_and_base64_and_returns_clean_business_
         )
 
     expected_clean_json = {
+        "schema_version": "multi-source-v1",
         "note": {
-            "note_number": "479/2025",
-            "sender_organization": "Embassy of Test",
-            "request_type_code": "CAP_MOI",
+            "note_number": ["479/2025"],
+            "sender_organization": ["Embassy of Test"],
+            "request_type_code": ["CAP_MOI"],
         },
         "applicants": [
             {
-                "full_name": "JOHN DOE",
-                "date_of_birth": "1967-11-20",
-                "gender": "M",
-                "nationality": "USA",
-                "passport_number": "A1234567",
-                "passport_type": "ORDINARY",
-                "passport_issue_date": "2020-01-01",
-                "passport_expiration": "2030-01-01",
-                "visa_type": "DN1",
-                "number_of_entries": "MULTIPLE",
-                "entry_date": "2026-11-10",
-                "exit_date": "2026-12-10",
+                "full_name": ["JOHN DOE"],
+                "date_of_birth": ["1967-11-20"],
+                "gender": ["M"],
+                "nationality": ["USA"],
+                "passport_number": ["A1234567"],
+                "passport_type": ["ORDINARY"],
+                "passport_issue_date": ["2020-01-01"],
+                "passport_expiration": ["2030-01-01"],
+                "visa_type": ["DN1"],
+                "number_of_entries": ["MULTIPLE"],
+                "entry_date": ["2026-11-10"],
+                "exit_date": ["2026-12-10"],
             }
         ],
     }

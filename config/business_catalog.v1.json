@@ -4,17 +4,18 @@
     "gender": {
       "on_unmapped": "null",
       "items": [
-        {"canonical": "Male", "aliases": ["M", "Male", "Nam", "Mr", "Ông"]},
-        {"canonical": "Female", "aliases": ["F", "Female", "Nữ", "Ms", "Mrs", "Bà"]}
+        {"canonical": "M", "aliases": ["M", "Male", "Nam", "Mr", "Ông"]},
+        {"canonical": "F", "aliases": ["F", "Female", "Nữ", "Ms", "Mrs", "Bà"]},
+        {"canonical": "X", "aliases": ["X", "Unspecified", "Không xác định"]}
       ]
     },
     "passport_type": {
       "on_unmapped": "null",
       "items": [
-        {"canonical": "Ordinary", "aliases": ["Ordinary", "Phổ thông", "P"]},
-        {"canonical": "Diplomatic", "aliases": ["Diplomatic", "Ngoại giao", "D"]},
-        {"canonical": "Official", "aliases": ["Official", "Công vụ", "O"]},
-        {"canonical": "Service", "aliases": ["Service", "S"]}
+        {"canonical": "P", "aliases": ["Ordinary", "Phổ thông", "P"]},
+        {"canonical": "D", "aliases": ["Diplomatic", "Ngoại giao", "D"]},
+        {"canonical": "O", "aliases": ["Official", "Công vụ", "O"]},
+        {"canonical": "S", "aliases": ["Service", "S"]}
       ]
     },
     "number_of_entries": {
@@ -36,8 +37,48 @@
       ]
     },
     "nationality": {
-      "on_unmapped": "preserve",
-      "items": []
+      "on_unmapped": "null",
+      "canonical_pattern": "^[A-Z]{3}$",
+      "compact_uppercase": true,
+      "items": [
+        {"canonical": "AGO", "aliases": ["Angola", "Angolan"]},
+        {"canonical": "AUS", "aliases": ["Australia", "Australian"]},
+        {"canonical": "AUT", "aliases": ["Austria", "Austrian"]},
+        {"canonical": "BEL", "aliases": ["Belgium", "Belgian"]},
+        {"canonical": "CAN", "aliases": ["Canada", "Canadian"]},
+        {"canonical": "CHE", "aliases": ["Switzerland", "Swiss"]},
+        {"canonical": "CHN", "aliases": ["China", "Chinese"]},
+        {"canonical": "CZE", "aliases": ["Czech Republic", "Czechia", "Czech"]},
+        {"canonical": "DEU", "aliases": ["Germany", "German"]},
+        {"canonical": "DNK", "aliases": ["Denmark", "Danish"]},
+        {"canonical": "ESP", "aliases": ["Spain", "Spanish"]},
+        {"canonical": "FIN", "aliases": ["Finland", "Finnish"]},
+        {"canonical": "FRA", "aliases": ["France", "French", "Pháp"]},
+        {"canonical": "GBR", "aliases": ["United Kingdom", "British", "UK"]},
+        {"canonical": "HUN", "aliases": ["Hungary", "Hungarian"]},
+        {"canonical": "IDN", "aliases": ["Indonesia", "Indonesian"]},
+        {"canonical": "IND", "aliases": ["India", "Indian"]},
+        {"canonical": "IRL", "aliases": ["Ireland", "Irish"]},
+        {"canonical": "ITA", "aliases": ["Italy", "Italian"]},
+        {"canonical": "JPN", "aliases": ["Japan", "Japanese"]},
+        {"canonical": "KHM", "aliases": ["Cambodia", "Cambodian"]},
+        {"canonical": "KOR", "aliases": ["Korea", "South Korea", "Korean"]},
+        {"canonical": "LAO", "aliases": ["Laos", "Lao"]},
+        {"canonical": "MYS", "aliases": ["Malaysia", "Malaysian"]},
+        {"canonical": "MOZ", "aliases": ["Mozambique", "Mozambican"]},
+        {"canonical": "NLD", "aliases": ["Netherlands", "Dutch"]},
+        {"canonical": "NOR", "aliases": ["Norway", "Norwegian"]},
+        {"canonical": "NZL", "aliases": ["New Zealand", "New Zealander"]},
+        {"canonical": "PHL", "aliases": ["Philippines", "Filipino"]},
+        {"canonical": "POL", "aliases": ["Poland", "Polish"]},
+        {"canonical": "RUS", "aliases": ["Russia", "Russian"]},
+        {"canonical": "SAU", "aliases": ["Saudi Arabia", "Saudi"]},
+        {"canonical": "SGP", "aliases": ["Singapore", "Singaporean"]},
+        {"canonical": "SWE", "aliases": ["Sweden", "Swedish"]},
+        {"canonical": "THA", "aliases": ["Thailand", "Thai"]},
+        {"canonical": "USA", "aliases": ["United States", "United States of America", "American", "U.S.A", "US"]},
+        {"canonical": "VNM", "aliases": ["Vietnam", "Viet Nam", "Vietnamese", "Việt Nam"]}
+      ]
     },
     "sender_organization": {
       "on_unmapped": "preserve",

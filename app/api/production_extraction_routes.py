@@ -12,13 +12,11 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from starlette.datastructures import UploadFile
 
 from app.schemas.production_extraction import (
+    MultiValueBusinessApplicant,
+    MultiValueBusinessNote,
+    MultiValueBusinessOutput,
     ProductionExtractionResponse,
     ProductionReadinessResponse,
-)
-from app.schemas.teacher_extraction import (
-    TeacherBusinessApplicantV8,
-    TeacherBusinessNoteV8,
-    TeacherBusinessOutputV8,
 )
 from app.services.exceptions import DocumentValidationError, ProductionExtractionError
 from app.services.production_extraction import ProductionExtractionService
@@ -36,7 +34,9 @@ def _verify_api_key(request: Request) -> bool:
     if not expected_key:
         return True
 
-    configured_header = (getattr(settings, "production_api_key_header", None) or "X-API-Key").strip()
+    configured_header = (
+        getattr(settings, "production_api_key_header", None) or "X-API-Key"
+    ).strip()
     candidate_headers = [
         configured_header,
         "X-API-Key",
@@ -76,7 +76,9 @@ def _decode_base64_pdf(raw_b64: str) -> bytes:
             raise DocumentValidationError("Invalid base64-encoded PDF content.") from exc
 
 
-async def _extract_pdf_bytes_and_filename(request: Request, max_bytes: int, max_mb: int) -> tuple[bytes, str]:
+async def _extract_pdf_bytes_and_filename(
+    request: Request, max_bytes: int, max_mb: int
+) -> tuple[bytes, str]:
     content_type = (request.headers.get("content-type") or "").lower()
 
     if "application/json" in content_type:
@@ -143,7 +145,9 @@ async def _extract_pdf_bytes_and_filename(request: Request, max_bytes: int, max_
                         raise DocumentValidationError("The uploaded file is empty.")
                     if not raw_bytes.startswith(b"%PDF-"):
                         try:
-                            raw_bytes = _decode_base64_pdf(raw_bytes.decode("utf-8", errors="ignore"))
+                            raw_bytes = _decode_base64_pdf(
+                                raw_bytes.decode("utf-8", errors="ignore")
+                            )
                         except Exception:
                             pass
                     return raw_bytes, filename
@@ -160,7 +164,8 @@ async def _extract_pdf_bytes_and_filename(request: Request, max_bytes: int, max_
                     return pdf_bytes, filename
 
             raise DocumentValidationError(
-                "Provide either a PDF file upload ('file') or base64 string ('file_base64' / 'base64')."
+                "Provide either a PDF file upload ('file') or base64 string "
+                "('file_base64' / 'base64')."
             )
         finally:
             await form.close()
@@ -231,37 +236,31 @@ async def _run_extraction_pipeline(request: Request) -> ProductionExtractionResp
         raise HTTPException(status_code=code, detail=str(exc)) from exc
 
 
-@router.post("", response_model=TeacherBusinessOutputV8)
+@router.post("", response_model=MultiValueBusinessOutput)
 async def create_document_extraction(
     request: Request,
-) -> TeacherBusinessOutputV8 | Response:
+) -> MultiValueBusinessOutput | Response:
     if not _verify_api_key(request):
         return Response(status_code=status.HTTP_401_UNAUTHORIZED)
     result = await _run_extraction_pipeline(request)
-    return TeacherBusinessOutputV8(
-        note=TeacherBusinessNoteV8(
-            note_number=result.extraction.note.note_number,
-            sender_organization=result.extraction.note.sender_organization,
-            request_type_code=result.extraction.note.request_type_code,
-        ),
-        applicants=[
-            TeacherBusinessApplicantV8(
-                full_name=item.full_name,
-                date_of_birth=item.date_of_birth,
-                gender=item.gender,
-                nationality=item.nationality,
-                passport_number=item.passport_number,
-                passport_type=item.passport_type,
-                passport_issue_date=item.passport_issue_date,
-                passport_expiration=item.passport_expiration,
-                visa_type=item.visa_type,
-                number_of_entries=item.number_of_entries,
-                entry_date=item.entry_date,
-                exit_date=item.exit_date,
-            )
-            for item in result.extraction.applicants
-        ],
-    )
+    if result.multi_source_output is None:
+        return MultiValueBusinessOutput(
+            note=MultiValueBusinessNote(
+                note_number=[result.extraction.note.note_number],
+                sender_organization=[result.extraction.note.sender_organization],
+                request_type_code=[result.extraction.note.request_type_code],
+            ),
+            applicants=[
+                MultiValueBusinessApplicant(
+                    **{
+                        field: [getattr(item, field)]
+                        for field in MultiValueBusinessApplicant.model_fields
+                    }
+                )
+                for item in result.extraction.applicants
+            ],
+        )
+    return result.multi_source_output
 
 
 @router.post("/debug", response_model=ProductionExtractionResponse)

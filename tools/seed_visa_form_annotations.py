@@ -91,32 +91,35 @@ def main() -> None:
         created = 0
         for index, page in enumerate(pages, start=1):
             mode = "SEED" if args.execute else "DRY-RUN"
-            fields = service.extract_page_fields(
-                page.id,
-                use_ocr=args.use_ocr,
-                run_ocr_if_missing=args.run_ocr_if_missing,
-            )
-            anchors_found = sum(1 for f in fields if f.anchor_found)
-            values_extracted = sum(1 for f in fields if f.value_text)
-            print(
-                f"[{index}/{len(pages)}] {mode} page={page.id} "
-                f"document={page.document_id} page_number={page.page_number} "
-                f"size={page.width}x{page.height} fields={len(fields)} "
-                f"anchors_detected={anchors_found}/{len(fields)} "
-                f"values_extracted={values_extracted}/{len(fields)}"
-            )
-            if args.execute:
-                try:
-                    service.create_template_annotation(
-                        page_id=page.id,
-                        template_version=args.template_version,
-                        replace_existing=args.replace_existing,
-                        use_ocr=args.use_ocr,
-                        run_ocr_if_missing=args.run_ocr_if_missing,
-                    )
-                    created += 1
-                except VisaFormAnnotationConflictError as exc:
-                    print(f"    [SKIP] page={page.id} conflict: {exc}")
+            try:
+                fields = service.extract_page_fields(
+                    page.id,
+                    use_ocr=args.use_ocr,
+                    run_ocr_if_missing=args.run_ocr_if_missing,
+                )
+                anchors_found = sum(1 for f in fields if f.anchor_found)
+                values_extracted = sum(1 for f in fields if f.value_text)
+                print(
+                    f"[{index}/{len(pages)}] {mode} page={page.id} "
+                    f"document={page.document_id} page_number={page.page_number} "
+                    f"size={page.width}x{page.height} fields={len(fields)} "
+                    f"anchors_detected={anchors_found}/{len(fields)} "
+                    f"values_extracted={values_extracted}/{len(fields)}"
+                )
+                if args.execute:
+                    try:
+                        service.create_template_annotation(
+                            page_id=page.id,
+                            template_version=args.template_version,
+                            replace_existing=args.replace_existing,
+                            use_ocr=args.use_ocr,
+                            run_ocr_if_missing=args.run_ocr_if_missing,
+                        )
+                        created += 1
+                    except VisaFormAnnotationConflictError as exc:
+                        print(f"    [SKIP] page={page.id} conflict: {exc}")
+            except Exception as exc:
+                print(f"[{index}/{len(pages)}] [ERROR] page={page.id} failed: {exc}", file=sys.stderr)
     finally:
         database.close()
 

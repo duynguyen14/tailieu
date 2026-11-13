@@ -29,12 +29,12 @@ def test_business_catalog_maps_closed_fields_and_preserves_open_fields() -> None
     mapped, decisions = mapper.map_student_target(source)
 
     assert source["a"][0]["sex"] == "M"
-    assert mapped["a"][0]["sex"] == "Male"
-    assert mapped["a"][0]["nat"] == "U.S.A"
-    assert mapped["a"][0]["pt"] == "Official"
+    assert mapped["a"][0]["sex"] == "M"
+    assert mapped["a"][0]["nat"] == "USA"
+    assert mapped["a"][0]["pt"] == "O"
     assert mapped["a"][0]["vt"] == "NG4"
     assert mapped["a"][0]["ne"] == "MULTIPLE"
-    assert any(item.field == "nationality" and item.status == "UNMAPPED" for item in decisions)
+    assert any(item.field == "nationality" and item.status == "ALIAS" for item in decisions)
 
 
 def test_business_catalog_nulls_invalid_strict_visa_type() -> None:

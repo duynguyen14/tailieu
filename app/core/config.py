@@ -257,6 +257,41 @@ class Settings(BaseSettings):
     production_include_reconstructed_text: bool = False
     production_catalog_mapping_enabled: bool = True
     production_catalog_path: Path = Path("config/business_catalog.v1.json")
+    production_passport_service_enabled: bool = False
+    production_passport_service_url: str = "http://127.0.0.1:8007/internal/v1/passports"
+    production_passport_service_timeout_seconds: float = Field(
+        default=5.0, ge=0.1, le=60.0
+    )
+    production_passport_page_types: str = "PASSPORT_FRONT"
+
+    # Private passport MRZ runtime. The detector is ONNX so this process does
+    # not need Torch/Ultralytics; Paddle CTC owns the configured GPU.
+    passport_mrz_service_enabled: bool = False
+    passport_mrz_detector_model_path: Path = Path(
+        "models/passport_mrz/detector.onnx"
+    )
+    passport_mrz_detector_device: DevicePreference = DevicePreference.CPU
+    passport_mrz_detector_image_size: int = Field(default=640, ge=320, le=1920)
+    passport_mrz_detector_confidence: float = Field(default=0.25, ge=0.0, le=1.0)
+    passport_mrz_detector_rotation_fallback: bool = True
+    passport_mrz_detector_rotation_min_confidence: float = Field(
+        default=0.85, ge=0.0, le=1.0
+    )
+    passport_mrz_ocr_model_dir: Path = Path("models/passport_mrz/recognition")
+    passport_mrz_ocr_dict_path: Path = Path(
+        "models/passport_mrz/recognition/mrz_dict.txt"
+    )
+    passport_mrz_ocr_device: DevicePreference = DevicePreference.CUDA
+    passport_mrz_ocr_gpu_device_id: int = Field(default=0, ge=0)
+    passport_mrz_ocr_gpu_memory_mb: int = Field(default=500, ge=64, le=16384)
+    passport_mrz_ocr_cpu_threads: int = Field(default=4, ge=1, le=128)
+    passport_mrz_ocr_batch_size: int = Field(default=16, ge=1, le=256)
+    passport_mrz_ocr_min_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    passport_mrz_preload_models: bool = True
+    passport_mrz_warmup_models: bool = True
+    passport_mrz_api_host: str = "127.0.0.1"
+    passport_mrz_api_port: int = Field(default=8007, ge=1, le=65535)
+    passport_mrz_max_batch_pages: int = Field(default=32, ge=1, le=256)
 
     pdf_dpi: int = Field(default=250, ge=72, le=400)
     max_file_size_mb: int = Field(default=30, ge=1, le=500)
@@ -440,6 +475,35 @@ class Settings(BaseSettings):
             for item in self.production_ocr_page_types.split(",")
             if item.strip()
         ]
+
+    @property
+    def production_passport_service_base_url(self) -> str:
+        base_url = self.production_passport_service_url.strip().rstrip("/")
+        if not base_url.startswith(("http://", "https://")):
+            raise ValueError(
+                "PRODUCTION_PASSPORT_SERVICE_URL must start with http:// or https://"
+            )
+        return base_url
+
+    @property
+    def production_passport_page_type_list(self) -> list[str]:
+        return [
+            item.strip().upper()
+            for item in self.production_passport_page_types.split(",")
+            if item.strip()
+        ]
+
+    @property
+    def passport_mrz_detector_model_resolved_path(self) -> Path:
+        return self.resolve_project_path(self.passport_mrz_detector_model_path)
+
+    @property
+    def passport_mrz_ocr_model_resolved_path(self) -> Path:
+        return self.resolve_project_path(self.passport_mrz_ocr_model_dir)
+
+    @property
+    def passport_mrz_ocr_dict_resolved_path(self) -> Path:
+        return self.resolve_project_path(self.passport_mrz_ocr_dict_path)
 
     @property
     def annotation_storage_path(self) -> Path:

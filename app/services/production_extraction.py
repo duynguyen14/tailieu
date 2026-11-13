@@ -15,8 +15,8 @@ import httpx
 from app.core.config import DevicePreference, Settings
 from app.domain.types import RenderedPage
 from app.schemas.production_extraction import (
-    ProductionExtractionResponse,
     ProductionCatalogMappingReport,
+    ProductionExtractionResponse,
     ProductionModelStatus,
     ProductionOcrResponse,
     ProductionPageClassificationResponse,
@@ -26,11 +26,11 @@ from app.schemas.production_extraction import (
 )
 from app.schemas.student_extraction import (
     STUDENT_APPLICANT_KEYS,
-    STUDENT_NOTE_KEYS,
     build_student_user_prompt,
     student_target_to_compact_document,
 )
 from app.services.exceptions import ProductionExtractionError
+from app.services.multi_source_aggregation import build_multi_source_output
 from app.services.pdf_renderer import PdfRenderer
 from app.services.student_model_runtime import (
     apply_student_chat_template,
@@ -1390,9 +1390,17 @@ class ProductionExtractionService:
             ocr_round_trip_ms,
             ocr_result.timings.total_ms,
         )
-        compact_output, generated_tokens, extraction_ms = self._student.generate(
-            ocr_result.reconstructed_text
-        )
+        if ocr_result.reconstructed_text.strip():
+            compact_output, generated_tokens, extraction_ms = self._student.generate(
+                ocr_result.reconstructed_text
+            )
+        else:
+            compact_output = {
+                "n": {"no": None, "snd": None, "rt": None},
+                "a": [],
+            }
+            generated_tokens = 0
+            extraction_ms = 0.0
         LOGGER.info(
             "Extraction student completed request_id=%s filename=%r generated_tokens=%d "
             "elapsed_ms=%.1f",
@@ -1409,6 +1417,11 @@ class ProductionExtractionService:
             mapped_output,
             case_id=request_id,
             document_id=request_id,
+        )
+        multi_source_output = build_multi_source_output(
+            mapped_output,
+            ocr_result.passport_results,
+            self._catalog_mapper,
         )
         total_ms = (time.perf_counter() - total_started) * 1000
         LOGGER.info(
@@ -1428,6 +1441,8 @@ class ProductionExtractionService:
             compact_model_output=compact_output,
             catalog_mapped_output=mapped_output,
             catalog_mapping=catalog_mapping,
+            multi_source_output=multi_source_output,
+            passport_results=ocr_result.passport_results,
             reconstructed_text=(
                 ocr_result.reconstructed_text
                 if self.settings.production_include_reconstructed_text
@@ -1440,6 +1455,8 @@ class ProductionExtractionService:
                 classification_ms=ocr_result.timings.classification_ms,
                 ocr_ms=ocr_result.timings.ocr_ms,
                 reconstruction_ms=ocr_result.timings.reconstruction_ms,
+                passport_mrz_ms=ocr_result.timings.passport_mrz_ms,
+                passport_mrz_status=ocr_result.timings.passport_mrz_status,
                 extraction_ms=round(extraction_ms, 3),
                 total_ms=round(total_ms, 3),
             ),
@@ -1614,6 +1631,11 @@ class ProductionExtractionService:
                 case_id=request_id,
                 document_id=request_id,
             )
+            multi_source_output = build_multi_source_output(
+                mapped_output,
+                [],
+                self._catalog_mapper,
+            )
         finally:
             for page in prepared_pages:
                 page.close()
@@ -1628,6 +1650,7 @@ class ProductionExtractionService:
             compact_model_output=compact_output,
             catalog_mapped_output=mapped_output,
             catalog_mapping=catalog_mapping,
+            multi_source_output=multi_source_output,
             reconstructed_text=(
                 reconstructed_text
                 if self.settings.production_include_reconstructed_text

@@ -5,13 +5,21 @@ import logging
 import tempfile
 import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import httpx
+
 from app.core.config import DevicePreference, Settings
 from app.domain.types import RenderedPage
 from app.schemas.production_extraction import (
+    PassportMrzBatchRequest,
+    PassportMrzBatchResponse,
+    PassportMrzPageInput,
+    PassportMrzPageResult,
+    PassportMrzReadinessResponse,
     ProductionModelStatus,
     ProductionOcrResponse,
     ProductionOcrTiming,
@@ -81,6 +89,8 @@ class ProductionOcrService:
         self._classifier: OnnxPageClassifier | None = None
         self._orientation: PaddleOrientationClassifier | None = None
         self._ocr: PaddleOcrEngine | None = None
+        self._passport_client: httpx.Client | None = None
+        self._passport_executor: ThreadPoolExecutor | None = None
         self._models: list[ProductionModelStatus] = []
 
     def initialize(self) -> None:
@@ -146,6 +156,29 @@ class ProductionOcrService:
                     message="Seal/layout exclusion model is not loaded.",
                 ),
             ]
+            if self.settings.production_passport_service_enabled:
+                timeout_seconds = (
+                    self.settings.production_passport_service_timeout_seconds
+                )
+                self._passport_client = httpx.Client(
+                    timeout=httpx.Timeout(
+                        timeout_seconds,
+                        connect=min(1.0, timeout_seconds),
+                    )
+                )
+                self._passport_executor = ThreadPoolExecutor(
+                    max_workers=1,
+                    thread_name_prefix="passport-mrz",
+                )
+                self._models.append(
+                    ProductionModelStatus(
+                        name="passport_mrz",
+                        loaded=True,
+                        device="remote",
+                        model=self.settings.production_passport_service_base_url,
+                        message="Called only for PASSPORT_FRONT pages; timeout is 5 seconds.",
+                    )
+                )
             if self.settings.production_warmup_models:
                 self._warmup()
             self._ready = True
@@ -176,17 +209,97 @@ class ProductionOcrService:
             image.close()
 
     def readiness(self) -> ProductionReadinessResponse:
+        models = list(self._models)
+        ready = self._ready
+        error = self._error
+        if (
+            self.settings.production_passport_service_enabled
+            and self._passport_client is not None
+        ):
+            try:
+                response = self._passport_client.get(
+                    f"{self.settings.production_passport_service_base_url}/readiness",
+                    timeout=min(
+                        1.0,
+                        self.settings.production_passport_service_timeout_seconds,
+                    ),
+                )
+                response.raise_for_status()
+                remote = PassportMrzReadinessResponse.model_validate(response.json())
+                ready = ready and remote.enabled and remote.ready
+                models = [item for item in models if item.name != "passport_mrz"]
+                models.append(
+                    ProductionModelStatus(
+                        name="passport_mrz",
+                        loaded=remote.ready,
+                        device=remote.recognizer_device,
+                        model=remote.recognizer_model,
+                        message=remote.error,
+                    )
+                )
+                if not remote.ready:
+                    error = remote.error or "Passport MRZ service is not ready."
+            except (httpx.HTTPError, TypeError, ValueError) as exc:
+                ready = False
+                error = f"Passport MRZ service is unavailable: {exc}"
         return ProductionReadinessResponse(
             enabled=self.settings.production_ocr_service_enabled,
-            ready=self._ready,
+            ready=ready,
             loading=self._loading,
             seal_detection_enabled=False,
-            models=self._models,
-            error=self._error,
+            models=models,
+            error=error,
         )
 
     def close(self) -> None:
         self._ready = False
+        if self._passport_client is not None:
+            self._passport_client.close()
+            self._passport_client = None
+        if self._passport_executor is not None:
+            self._passport_executor.shutdown(wait=False, cancel_futures=True)
+            self._passport_executor = None
+
+    def _submit_passport_pages(
+        self,
+        *,
+        pages: list[_PreparedPage],
+        request_id: str,
+    ) -> Future[PassportMrzBatchResponse] | None:
+        if (
+            not pages
+            or self._passport_client is None
+            or self._passport_executor is None
+        ):
+            return None
+        from app.models.ocr_preprocessing import png_bytes
+
+        payload = PassportMrzBatchRequest(
+            request_id=request_id,
+            pages=[
+                PassportMrzPageInput(
+                    page_number=page.page_number,
+                    image_base64=base64.b64encode(
+                        page.image_bytes or png_bytes(page.image)
+                    ).decode("ascii"),
+                )
+                for page in pages
+            ],
+        )
+        return self._passport_executor.submit(self._read_passport_pages, payload)
+
+    def _read_passport_pages(
+        self, payload: PassportMrzBatchRequest
+    ) -> PassportMrzBatchResponse:
+        if self._passport_client is None:
+            raise RuntimeError("Passport MRZ HTTP client is not initialized.")
+        response = self._passport_client.post(
+            f"{self.settings.production_passport_service_base_url}/read",
+            json=payload.model_dump(mode="json"),
+            timeout=self.settings.production_passport_service_timeout_seconds,
+        )
+        response.raise_for_status()
+        return PassportMrzBatchResponse.model_validate(response.json())
 
     def reconstruct(
         self,
@@ -369,6 +482,12 @@ class ProductionOcrService:
         assert self._ocr is not None
         total_started = time.perf_counter()
         warnings: list[str] = []
+        passport_results: list[PassportMrzPageResult] = []
+        passport_mrz_ms = 0.0
+        passport_mrz_status = "NOT_REQUESTED"
+        reconstructed_text = ""
+        reconstruction_ms = 0.0
+        page_results: list[ProductionPageResult] = []
 
         render_started = time.perf_counter()
         try:
@@ -412,13 +531,36 @@ class ProductionOcrService:
                 ],
             )
 
+            passport_types = set(self.settings.production_passport_page_type_list)
+            passport_rows = [
+                (page, prediction)
+                for page, prediction in zip(prepared_pages, predictions, strict=True)
+                if self.settings.production_passport_service_enabled
+                and prediction.label.value in passport_types
+            ]
+            passport_started = time.perf_counter()
+            passport_future = self._submit_passport_pages(
+                pages=[page for page, _prediction in passport_rows],
+                request_id=sha256,
+            )
+            if passport_rows and passport_future is None:
+                passport_mrz_status = "DISABLED"
+                warnings.append(
+                    "PASSPORT_FRONT page(s) were found, but the passport MRZ service "
+                    "is disabled."
+                )
+            elif passport_future is not None:
+                passport_mrz_status = "RUNNING"
+
             ocr_started = time.perf_counter()
             ocr_pages: list[_OcrPage] = []
             target_types = set(self.settings.production_ocr_page_type_list)
             has_target_page = any(
                 prediction.label.value in target_types for prediction in predictions
             )
-            fallback_all_pages = bool(prepared_pages) and not has_target_page
+            fallback_all_pages = (
+                bool(prepared_pages) and not has_target_page and not passport_rows
+            )
             if fallback_all_pages:
                 fallback_msg = (
                     "No page matched configured target page types "
@@ -460,13 +602,17 @@ class ProductionOcrService:
                 page.page_number: index
                 for index, (page, _prediction) in enumerate(target_rows)
             }
-            page_results: list[ProductionPageResult] = []
             for page, prediction in zip(prepared_pages, predictions, strict=True):
                 page_type = prediction.label.value
-                use_page = fallback_all_pages or (page_type in target_types)
+                use_ocr = fallback_all_pages or (page_type in target_types)
+                use_passport = (
+                    self.settings.production_passport_service_enabled
+                    and page_type in passport_types
+                )
+                use_page = use_ocr or use_passport
                 tokens: list[OcrTokenPrediction] = []
                 page_ocr_ms = 0.0
-                if use_page:
+                if use_ocr:
                     if batch_result is not None:
                         batch_index = batch_index_by_page[page.page_number]
                         tokens = batch_result.tokens_by_page[batch_index]
@@ -490,11 +636,12 @@ class ProductionOcrService:
                     )
                 else:
                     LOGGER.info(
-                        "OCR stage page filename=%r page=%d type=%s target=false "
+                        "OCR stage page filename=%r page=%d type=%s target=%s "
                         "tokens=0 elapsed_ms=0",
                         filename,
                         page.page_number,
                         page_type,
+                        "passport" if use_passport else "false",
                     )
                 if prediction.confidence < self.settings.low_confidence_threshold:
                     warnings.append(
@@ -521,45 +668,94 @@ class ProductionOcrService:
                 len(ocr_pages),
                 ocr_ms,
             )
-            if not ocr_pages:
+
+            if passport_future is not None:
+                timeout_seconds = (
+                    self.settings.production_passport_service_timeout_seconds
+                )
+                elapsed_seconds = time.perf_counter() - passport_started
+                remaining_seconds = max(0.0, timeout_seconds - elapsed_seconds)
+                try:
+                    passport_response = passport_future.result(
+                        timeout=remaining_seconds
+                    )
+                    passport_results = passport_response.pages
+                    passport_mrz_status = "COMPLETED"
+                except (TimeoutError, httpx.TimeoutException):
+                    passport_mrz_status = "TIMEOUT"
+                    passport_future.cancel()
+                    warnings.append(
+                        "Passport MRZ service exceeded the 5-second batch timeout; "
+                        "the partial non-passport result was retained."
+                    )
+                    LOGGER.warning(
+                        "Passport MRZ timed out filename=%r pages=%d timeout_seconds=%.1f",
+                        filename,
+                        len(passport_rows),
+                        timeout_seconds,
+                    )
+                except (httpx.HTTPError, RuntimeError, TypeError, ValueError) as exc:
+                    passport_mrz_status = "ERROR"
+                    warnings.append(
+                        f"Passport MRZ service failed; partial result retained: {exc}"
+                    )
+                    LOGGER.warning(
+                        "Passport MRZ failed filename=%r pages=%d error=%s",
+                        filename,
+                        len(passport_rows),
+                        exc,
+                    )
+                passport_mrz_ms = (time.perf_counter() - passport_started) * 1000
+                LOGGER.info(
+                    "Passport MRZ stage filename=%r pages=%d status=%s elapsed_ms=%.1f",
+                    filename,
+                    len(passport_rows),
+                    passport_mrz_status,
+                    passport_mrz_ms,
+                )
+
+            if not ocr_pages and not passport_rows:
                 raise ProductionExtractionError(
                     "No page was classified as an OCR/extraction target."
                 )
-            if not any(page.tokens for page in ocr_pages):
+            if ocr_pages and not any(page.tokens for page in ocr_pages):
                 raise ProductionExtractionError("OCR returned no usable text tokens.")
 
-            reconstruction_started = time.perf_counter()
-            reconstruction_inputs = [
-                PageReconstructionInput(
-                    page_id=f"page_{page.prepared.page_number}",
-                    page_number=page.prepared.page_number,
-                    page_type=page.page_type,
-                    page_role="NOTE",
-                    tokens=tuple(
-                        ReconstructionToken(
-                            id=f"p{page.prepared.page_number}_{token.token_id}",
-                            text=token.text,
-                            bbox=token.bbox,
-                            order=token.token_index,
-                        )
-                        for token in page.tokens
-                    ),
+            if ocr_pages:
+                reconstruction_started = time.perf_counter()
+                reconstruction_inputs = [
+                    PageReconstructionInput(
+                        page_id=f"page_{page.prepared.page_number}",
+                        page_number=page.prepared.page_number,
+                        page_type=page.page_type,
+                        page_role="NOTE",
+                        tokens=tuple(
+                            ReconstructionToken(
+                                id=f"p{page.prepared.page_number}_{token.token_id}",
+                                text=token.text,
+                                bbox=token.bbox,
+                                order=token.token_index,
+                            )
+                            for token in page.tokens
+                        ),
+                    )
+                    for page in ocr_pages
+                ]
+                reconstructed_text, reconstruction_results = reconstruct_case(
+                    reconstruction_inputs,
+                    tolerance_ratio=self.settings.text_reconstruction_line_tolerance,
                 )
-                for page in ocr_pages
-            ]
-            reconstructed_text, reconstruction_results = reconstruct_case(
-                reconstruction_inputs,
-                tolerance_ratio=self.settings.text_reconstruction_line_tolerance,
-            )
-            reconstruction_ms = (time.perf_counter() - reconstruction_started) * 1000
-            LOGGER.info(
-                "OCR stage reconstruction filename=%r chars=%d elapsed_ms=%.1f",
-                filename,
-                len(reconstructed_text),
-                reconstruction_ms,
-            )
-            for result in reconstruction_results:
-                warnings.extend(result.warnings)
+                reconstruction_ms = (
+                    time.perf_counter() - reconstruction_started
+                ) * 1000
+                LOGGER.info(
+                    "OCR stage reconstruction filename=%r chars=%d elapsed_ms=%.1f",
+                    filename,
+                    len(reconstructed_text),
+                    reconstruction_ms,
+                )
+                for result in reconstruction_results:
+                    warnings.extend(result.warnings)
         finally:
             for page in prepared_pages:
                 page.close()
@@ -570,6 +766,7 @@ class ProductionOcrService:
             sha256=sha256,
             page_count=len(rendered),
             reconstructed_text=reconstructed_text,
+            passport_results=passport_results,
             pages=page_results,
             timings=ProductionOcrTiming(
                 render_ms=round(render_ms, 3),
@@ -577,6 +774,8 @@ class ProductionOcrService:
                 classification_ms=round(classification_ms, 3),
                 ocr_ms=round(ocr_ms, 3),
                 reconstruction_ms=round(reconstruction_ms, 3),
+                passport_mrz_ms=round(passport_mrz_ms, 3),
+                passport_mrz_status=passport_mrz_status,
                 total_ms=round(total_ms, 3),
             ),
             warnings=list(dict.fromkeys(warnings)),

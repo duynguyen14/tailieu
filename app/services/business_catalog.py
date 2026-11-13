@@ -169,6 +169,17 @@ class BusinessCatalogMapper:
                     self._map_value(applicant, alias, field, index, decisions)
         return output, decisions
 
+    def map_value(
+        self, field: str, value: Any
+    ) -> tuple[str | None, MappingStatus]:
+        """Map one specialist value without exposing raw catalog internals."""
+        catalog = self._catalogs.get(field)
+        if catalog is None:
+            if value is None or not str(value).strip():
+                return None, "NULL"
+            return str(value).strip(), "UNMAPPED"
+        return catalog.map(value)
+
     def _map_value(
         self,
         payload: dict[str, Any],
