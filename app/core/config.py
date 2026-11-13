@@ -281,7 +281,7 @@ class Settings(BaseSettings):
     passport_mrz_ocr_dict_path: Path = Path(
         "models/passport_mrz/recognition/mrz_dict.txt"
     )
-    passport_mrz_ocr_device: DevicePreference = DevicePreference.CUDA
+    passport_mrz_ocr_device: DevicePreference = DevicePreference.CPU
     passport_mrz_ocr_gpu_device_id: int = Field(default=0, ge=0)
     passport_mrz_ocr_gpu_memory_mb: int = Field(default=500, ge=64, le=16384)
     passport_mrz_ocr_cpu_threads: int = Field(default=4, ge=1, le=128)
