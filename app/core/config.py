@@ -277,6 +277,7 @@ class Settings(BaseSettings):
     passport_mrz_detector_rotation_min_confidence: float = Field(
         default=0.85, ge=0.0, le=1.0
     )
+    passport_mrz_detector_max_workers: int = Field(default=4, ge=1, le=32)
     passport_mrz_ocr_model_dir: Path = Path("models/passport_mrz/recognition")
     passport_mrz_ocr_dict_path: Path = Path(
         "models/passport_mrz/recognition/mrz_dict.txt"

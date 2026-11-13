@@ -41,7 +41,11 @@ class PassportMrzService:
         try:
             self._detector = OnnxMrzDetector(self.settings)
             self._recognizer = PaddleMrzRecognizer(self.settings)
-            self._pipeline = PassportMrzPipeline(self._detector, self._recognizer)
+            self._pipeline = PassportMrzPipeline(
+                self._detector,
+                self._recognizer,
+                max_workers=self.settings.passport_mrz_detector_max_workers,
+            )
             if self.settings.passport_mrz_warmup_models:
                 detector_ms = self._detector.warmup()
                 recognizer_ms = self._recognizer.warmup()

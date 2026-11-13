@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
@@ -25,33 +26,63 @@ class _PageWork:
     warning: str | None = None
 
 
+def _process_single_page(
+    page_number: int,
+    image: np.ndarray,
+    detector: OnnxMrzDetector,
+) -> _PageWork:
+    work = _PageWork(page_number=page_number)
+    detection, work.detector_ms = detector.detect(image)
+    if detection is None:
+        work.warning = "MRZ region was not detected."
+        return work
+    work.detector_confidence = detection.confidence
+    crop_started = time.perf_counter()
+    try:
+        _, work.lines, work.deskew_angle = crop_mrz_lines(image, detection.bbox)
+    except Exception as exc:
+        work.warning = str(exc)
+        work.lines = []
+    work.crop_ms = (time.perf_counter() - crop_started) * 1000
+    return work
+
+
 class PassportMrzPipeline:
-    def __init__(self, detector: OnnxMrzDetector, recognizer: PaddleMrzRecognizer) -> None:
+    def __init__(
+        self,
+        detector: OnnxMrzDetector,
+        recognizer: PaddleMrzRecognizer,
+        max_workers: int = 4,
+    ) -> None:
         self.detector = detector
         self.recognizer = recognizer
+        self.max_workers = max(1, max_workers)
 
     def read_batch(
         self, pages: list[tuple[int, np.ndarray]]
     ) -> list[PassportMrzPageResult]:
-        work_items: list[_PageWork] = []
+        if not pages:
+            return []
+
+        if len(pages) > 1 and self.max_workers > 1:
+            worker_count = min(len(pages), self.max_workers)
+            with ThreadPoolExecutor(
+                max_workers=worker_count, thread_name_prefix="mrz-detect"
+            ) as executor:
+                futures = [
+                    executor.submit(_process_single_page, page_number, image, self.detector)
+                    for page_number, image in pages
+                ]
+                work_items = [future.result() for future in futures]
+        else:
+            work_items = [
+                _process_single_page(page_number, image, self.detector)
+                for page_number, image in pages
+            ]
+
         flat_lines: list[np.ndarray] = []
         line_ranges: list[tuple[int, int]] = []
-        for page_number, image in pages:
-            work = _PageWork(page_number=page_number)
-            work_items.append(work)
-            detection, work.detector_ms = self.detector.detect(image)
-            if detection is None:
-                work.warning = "MRZ region was not detected."
-                line_ranges.append((len(flat_lines), len(flat_lines)))
-                continue
-            work.detector_confidence = detection.confidence
-            crop_started = time.perf_counter()
-            try:
-                _, work.lines, work.deskew_angle = crop_mrz_lines(image, detection.bbox)
-            except Exception as exc:
-                work.warning = str(exc)
-                work.lines = []
-            work.crop_ms = (time.perf_counter() - crop_started) * 1000
+        for work in work_items:
             start = len(flat_lines)
             flat_lines.extend(line.image for line in work.lines or [])
             line_ranges.append((start, len(flat_lines)))
