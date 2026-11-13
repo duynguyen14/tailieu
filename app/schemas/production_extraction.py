@@ -193,7 +193,6 @@ class MultiValueBusinessApplicant(BaseModel):
 
 
 class MultiValueBusinessOutput(BaseModel):
-    schema_version: str = "multi-source-v1"
     note: MultiValueBusinessNote
     applicants: list[MultiValueBusinessApplicant] = Field(default_factory=list)
 

@@ -198,7 +198,6 @@ def test_production_endpoint_accepts_file_and_base64_and_returns_clean_business_
         )
 
     expected_clean_json = {
-        "schema_version": "multi-source-v1",
         "note": {
             "note_number": ["479/2025"],
             "sender_organization": ["Embassy of Test"],
