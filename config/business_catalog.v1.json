@@ -1,5 +1,5 @@
 {
-  "version": "business-catalog-v2",
+  "version": "business-catalog-v3",
   "catalogs": {
     "gender": {
       "on_unmapped": "null",
@@ -169,6 +169,13 @@
       "compact_uppercase": true,
       "items": [
         {
+          "canonical": "0RQ",
+          "aliases": [
+            "Unidentified",
+            "Unindentified"
+          ]
+        },
+        {
           "canonical": "ABW",
           "aliases": [
             "Aruba",
@@ -215,20 +222,6 @@
           ]
         },
         {
-          "canonical": "ALA",
-          "aliases": [
-            "Åland",
-            "Åland Islands",
-            "Ålandais",
-            "Ålandaise",
-            "Ålandish",
-            "AX",
-            "Îles Åland",
-            "Landskapet Åland",
-            "Quần đảo Åland"
-          ]
-        },
-        {
           "canonical": "ALB",
           "aliases": [
             "AL",
@@ -252,6 +245,13 @@
             "Andorre",
             "Principality of Andorra",
             "Principat d'Andorra"
+          ]
+        },
+        {
+          "canonical": "ANT",
+          "aliases": [
+            "Netherland Antilles",
+            "Netherlands Antilles"
           ]
         },
         {
@@ -418,7 +418,6 @@
           "canonical": "BEN",
           "aliases": [
             "Benin",
-            "Bénin",
             "Beninese",
             "Béninois",
             "Béninoise",
@@ -428,25 +427,11 @@
           ]
         },
         {
-          "canonical": "BES",
-          "aliases": [
-            "Bonaire, Sint Eustatius and Saba",
-            "Bonaire, Sint Eustatius en Saba",
-            "Boneiru, Sint Eustatius y Saba",
-            "BQ",
-            "Ca-ri-bê Hà Lan",
-            "Caribbean Netherlands",
-            "Caribisch Nederland",
-            "Pays-Bas caribéens"
-          ]
-        },
-        {
           "canonical": "BFA",
           "aliases": [
             "BF",
             "Burkina Faso",
             "Burkinabe",
-            "Burkinabé",
             "Burkinabée",
             "République du Burkina"
           ]
@@ -519,20 +504,6 @@
           ]
         },
         {
-          "canonical": "BLM",
-          "aliases": [
-            "Barthéloméen",
-            "Barthéloméenne",
-            "BL",
-            "Collectivité de Saint-Barthélemy",
-            "Collectivity of Saint Barthélemy",
-            "Saint Barthélemy",
-            "Saint-Barthélemy",
-            "Saint Barthélemy Islander",
-            "St. Barthélemy"
-          ]
-        },
-        {
           "canonical": "BLR",
           "aliases": [
             "Belarus",
@@ -542,7 +513,6 @@
             "BY",
             "Republic of Belarus",
             "Белару́сь",
-            "Беларусь",
             "Республика Беларусь",
             "Рэспубліка Беларусь"
           ]
@@ -741,7 +711,6 @@
             "Chinoise",
             "CN",
             "People's Republic of China",
-            "Trung Quốc",
             "中华人民共和国",
             "中国"
           ]
@@ -752,14 +721,12 @@
             "Bờ Biển Ngà",
             "CI",
             "Côte d'Ivoire",
-            "Côte d’Ivoire",
             "Ivoirien",
             "Ivoirienne",
             "Ivorian",
             "Ivory Coast",
             "Republic of Côte d'Ivoire",
-            "République de Côte d'Ivoire",
-            "République de Côte d’Ivoire"
+            "République de Côte d'Ivoire"
           ]
         },
         {
@@ -776,23 +743,10 @@
           ]
         },
         {
-          "canonical": "COD",
+          "canonical": "CNA",
           "aliases": [
-            "CD",
-            "Cộng hòa Dân chủ Congo",
-            "Congo, Democratic Republic of the",
-            "Congo (DRC)",
-            "Congo - Kinshasa",
-            "Congo-Kinshasa",
-            "Congo (RDC)",
-            "Democratic Republic of the Congo",
-            "Ditunga dia Kongu wa Mungalaata",
-            "DR Congo",
-            "Jamhuri ya Kidemokrasia ya Kongo",
-            "RD Congo",
-            "Repubilika ya Kongo Demokratiki",
-            "Republiki ya Kongó Demokratiki",
-            "République démocratique du Congo"
+            "Trung Quô´c",
+            "Trung Quốc"
           ]
         },
         {
@@ -802,7 +756,6 @@
             "Cộng hòa Congo",
             "Congo",
             "Congo - Brazzaville",
-            "Congo-Brazzaville",
             "Congo (Republic)",
             "Repubilika ya Kongo",
             "Republic of the Congo",
@@ -892,19 +845,6 @@
           ]
         },
         {
-          "canonical": "CUW",
-          "aliases": [
-            "Country of Curaçao",
-            "Curaçao",
-            "Curaçaoan",
-            "Curacien",
-            "Curacienne",
-            "CW",
-            "Land Curaçao",
-            "Pais Kòrsou"
-          ]
-        },
-        {
           "canonical": "CXR",
           "aliases": [
             "Christmas Island",
@@ -958,6 +898,10 @@
             "Tchèque",
             "Tchéquie"
           ]
+        },
+        {
+          "canonical": "D",
+          "aliases": []
         },
         {
           "canonical": "DEU",
@@ -1089,8 +1033,6 @@
             "EH",
             "República Árabe Saharaui Democrática",
             "Sahara Occidental",
-            "Sahara occidental",
-            "Sahrawi",
             "Sahrawi Arab Democratic Republic",
             "Tây Sahara",
             "Western Sahara",
@@ -1233,6 +1175,17 @@
           ]
         },
         {
+          "canonical": "FXX",
+          "aliases": [
+            "France Metropolitan",
+            "Metropolitan France"
+          ]
+        },
+        {
+          "canonical": "G",
+          "aliases": []
+        },
+        {
           "canonical": "GAB",
           "aliases": [
             "GA",
@@ -1245,17 +1198,34 @@
           ]
         },
         {
-          "canonical": "GBR",
+          "canonical": "GBD",
           "aliases": [
-            "Britannique",
-            "British",
-            "GB",
-            "R.-U.",
-            "Royaume-Uni",
-            "UK",
-            "United Kingdom",
-            "United Kingdom of Great Britain and Northern Ireland",
-            "Vương quốc Anh"
+            "British Dependent Territories Citizen",
+            "British Overseas Territories Citizen"
+          ]
+        },
+        {
+          "canonical": "GBN",
+          "aliases": [
+            "British National (Overseas)"
+          ]
+        },
+        {
+          "canonical": "GBO",
+          "aliases": [
+            "British Overseas Citizen"
+          ]
+        },
+        {
+          "canonical": "GBP",
+          "aliases": [
+            "British Protected Person"
+          ]
+        },
+        {
+          "canonical": "GBS",
+          "aliases": [
+            "British Subject"
           ]
         },
         {
@@ -1268,19 +1238,6 @@
             "Géorgien",
             "Géorgienne",
             "საქართველო"
-          ]
-        },
-        {
-          "canonical": "GGY",
-          "aliases": [
-            "Bailiwick of Guernsey",
-            "Bailliage de Guernesey",
-            "Dgèrnésiais",
-            "GG",
-            "Guernesey",
-            "Guernesiais",
-            "Guernesiaise",
-            "Guernsey"
           ]
         },
         {
@@ -1454,11 +1411,17 @@
           ]
         },
         {
+          "canonical": "HI-",
+          "aliases": [
+            "High Volta",
+            "Hightvolta"
+          ]
+        },
+        {
           "canonical": "HKG",
           "aliases": [
             "HK",
             "Hong Kong",
-            "Hồng Kông",
             "Hong Kong SAR China",
             "Hong Kong Special Administrative Region of the People's Republic of China",
             "Hong Konger",
@@ -1512,7 +1475,6 @@
           "aliases": [
             "Ayiti",
             "Haiti",
-            "Haïti",
             "Haitian",
             "Haïtien",
             "Haïtienne",
@@ -1545,18 +1507,6 @@
             "Indonésienne",
             "Republic of Indonesia",
             "Republik Indonesia"
-          ]
-        },
-        {
-          "canonical": "IMN",
-          "aliases": [
-            "Ellan Vannin or Mannin",
-            "Île de Man",
-            "IM",
-            "Isle of Man",
-            "Mannin",
-            "Manx",
-            "Đảo Man"
           ]
         },
         {
@@ -1651,7 +1601,6 @@
           "aliases": [
             "IL",
             "Israel",
-            "Israël",
             "Israeli",
             "Israélien",
             "Israélienne",
@@ -1685,19 +1634,6 @@
             "Jamaican",
             "Jamaïque",
             "JM"
-          ]
-        },
-        {
-          "canonical": "JEY",
-          "aliases": [
-            "Bailiwick of Jersey",
-            "Bailliage dé Jèrri",
-            "Bailliage de Jersey",
-            "JE",
-            "Jèrri",
-            "Jersey",
-            "Jersiais",
-            "Jersiaise"
           ]
         },
         {
@@ -1748,7 +1684,6 @@
             "KE",
             "Kenya",
             "Kenyan",
-            "Kényan",
             "Kényane",
             "Republic of Kenya"
           ]
@@ -1808,6 +1743,16 @@
             "St. Kitts & Nevis",
             "St. Kitts và Nevis"
           ]
+        },
+        {
+          "canonical": "KND1",
+          "aliases": [
+            "Wankada"
+          ]
+        },
+        {
+          "canonical": "KO",
+          "aliases": []
         },
         {
           "canonical": "KOR",
@@ -1905,6 +1850,12 @@
             "Saint-Lucienne",
             "Sainte-Lucie",
             "St. Lucia"
+          ]
+        },
+        {
+          "canonical": "LCA1",
+          "aliases": [
+            "Santalucia"
           ]
         },
         {
@@ -2009,15 +1960,6 @@
           ]
         },
         {
-          "canonical": "MAF",
-          "aliases": [
-            "MF",
-            "Saint Martin (French part)",
-            "Saint Martin Islander",
-            "St. Martin"
-          ]
-        },
-        {
           "canonical": "MAR",
           "aliases": [
             "Kingdom of Morocco",
@@ -2040,7 +1982,6 @@
             "MC",
             "Monaco",
             "Monegasque",
-            "Monégasque",
             "Principality of Monaco",
             "Principauté de Monaco"
           ]
@@ -2092,7 +2033,6 @@
             "Mexicaine",
             "Mexican",
             "Mexico",
-            "México",
             "Mexique",
             "MX",
             "United Mexican States"
@@ -2173,10 +2113,8 @@
           "aliases": [
             "ME",
             "Montenegrin",
-            "Monténégrin",
             "Monténégrine",
             "Montenegro",
-            "Monténégro",
             "Црна Гора"
           ]
         },
@@ -2204,6 +2142,10 @@
             "Quần đảo Bắc Mariana",
             "Sankattan Siha Na Islas Mariånas"
           ]
+        },
+        {
+          "canonical": "MO-",
+          "aliases": []
         },
         {
           "canonical": "MOZ",
@@ -2272,7 +2214,6 @@
           "aliases": [
             "Chalo cha Malawi, Dziko la Malaŵi",
             "Malawi",
-            "Malaŵi",
             "Malawian",
             "Malawien",
             "Malawienne",
@@ -2311,7 +2252,6 @@
             "Namibia",
             "Namibian",
             "Namibie",
-            "Namibië",
             "Namibien",
             "Namibienne",
             "Republic of Namibia",
@@ -2336,7 +2276,6 @@
             "NE",
             "Niger",
             "Nigerien",
-            "Nigérien",
             "Nigérienne",
             "Republic of Niger",
             "République du Niger"
@@ -2364,7 +2303,6 @@
             "NG",
             "Nigeria",
             "Nigerian",
-            "Nigérian",
             "Nigériane"
           ]
         },
@@ -2384,7 +2322,6 @@
           "canonical": "NIU",
           "aliases": [
             "Niue",
-            "Niuē",
             "Niuean",
             "Niuéen",
             "Niuéenne",
@@ -2429,7 +2366,6 @@
           "aliases": [
             "Federal Democratic Republic of Nepal",
             "Nepal",
-            "Népal",
             "Népalais",
             "Népalaise",
             "Nepalese",
@@ -2447,6 +2383,12 @@
             "Nauruane",
             "NR",
             "Republic of Nauru"
+          ]
+        },
+        {
+          "canonical": "NTZ",
+          "aliases": [
+            "Neutral Zone"
           ]
         },
         {
@@ -2477,6 +2419,13 @@
           ]
         },
         {
+          "canonical": "OTH",
+          "aliases": [
+            "Khác",
+            "Other"
+          ]
+        },
+        {
           "canonical": "PAK",
           "aliases": [
             "Islamic Republic of Pakistan",
@@ -2494,7 +2443,6 @@
           "aliases": [
             "PA",
             "Panama",
-            "Panamá",
             "Panamanian",
             "Panaméen",
             "Panaméenne",
@@ -2522,7 +2470,6 @@
             "PE",
             "Pérou",
             "Peru",
-            "Perú",
             "Peruvian",
             "Péruvien",
             "Péruvienne",
@@ -2561,6 +2508,10 @@
           ]
         },
         {
+          "canonical": "PLX",
+          "aliases": []
+        },
+        {
           "canonical": "PNG",
           "aliases": [
             "Independen Stet bilong Papua Niugini",
@@ -2573,6 +2524,12 @@
             "Papua Niu Gini",
             "Papua Niugini",
             "PG"
+          ]
+        },
+        {
+          "canonical": "PO-",
+          "aliases": [
+            "Polynesia"
           ]
         },
         {
@@ -2676,6 +2633,48 @@
           ]
         },
         {
+          "canonical": "Q051",
+          "aliases": [
+            "R11MXSF05 quốc gia 1"
+          ]
+        },
+        {
+          "canonical": "Q052",
+          "aliases": [
+            "R11MXSF05 quốc gia 2"
+          ]
+        },
+        {
+          "canonical": "Q102P",
+          "aliases": [
+            "QA kiểm thử Q102P B"
+          ]
+        },
+        {
+          "canonical": "Q10V3PZB21A",
+          "aliases": [
+            "Kiểm thử Q10V3PZB21 đã sửa"
+          ]
+        },
+        {
+          "canonical": "Q4217JP",
+          "aliases": [
+            "Kiểm thử Q4217JP"
+          ]
+        },
+        {
+          "canonical": "Q4GX3BF21",
+          "aliases": [
+            "Kiểm thử đã sửa Q4GX3BF21"
+          ]
+        },
+        {
+          "canonical": "Q9A5B",
+          "aliases": [
+            "QA GD Q9A5B 2"
+          ]
+        },
+        {
           "canonical": "QAT",
           "aliases": [
             "QA",
@@ -2686,6 +2685,42 @@
             "State of Qatar",
             "دولة قطر",
             "قطر"
+          ]
+        },
+        {
+          "canonical": "QBZ",
+          "aliases": [
+            "QA17MW64AHPS 21"
+          ]
+        },
+        {
+          "canonical": "QM1",
+          "aliases": [
+            "QA17MW64BU3P 21"
+          ]
+        },
+        {
+          "canonical": "QPI8L",
+          "aliases": [
+            "QA GD QPI8L 2"
+          ]
+        },
+        {
+          "canonical": "QQH19",
+          "aliases": [
+            "QA GD QQH19 2"
+          ]
+        },
+        {
+          "canonical": "QWP8",
+          "aliases": [
+            "QA kiểm thử QWP8 B"
+          ]
+        },
+        {
+          "canonical": "R3D21XYTO",
+          "aliases": [
+            "Danh mục thử R3D21XYTO"
           ]
         },
         {
@@ -2702,11 +2737,20 @@
           ]
         },
         {
+          "canonical": "RKS",
+          "aliases": [
+            "Kosovo"
+          ]
+        },
+        {
+          "canonical": "ROM",
+          "aliases": []
+        },
+        {
           "canonical": "ROU",
           "aliases": [
             "RO",
             "Romania",
-            "România",
             "Romanian",
             "Roumain",
             "Roumaine",
@@ -2741,6 +2785,13 @@
           ]
         },
         {
+          "canonical": "SA-",
+          "aliases": [
+            "Saharawi",
+            "Sahrawi"
+          ]
+        },
+        {
           "canonical": "SAU",
           "aliases": [
             "Ả Rập Xê-út",
@@ -2754,6 +2805,12 @@
             "Saudi Arabian",
             "السعودية",
             "المملكة العربية السعودية"
+          ]
+        },
+        {
+          "canonical": "SC-",
+          "aliases": [
+            "Scotland"
           ]
         },
         {
@@ -2771,12 +2828,15 @@
           ]
         },
         {
+          "canonical": "SE-",
+          "aliases": []
+        },
+        {
           "canonical": "SEN",
           "aliases": [
             "Republic of Senegal",
             "République du Sénégal",
             "Senegal",
-            "Sénégal",
             "Sénégalais",
             "Sénégalaise",
             "Senegalese",
@@ -2930,19 +2990,6 @@
           ]
         },
         {
-          "canonical": "SSD",
-          "aliases": [
-            "Nam Sudan",
-            "Republic of South Sudan",
-            "Soudan du Sud",
-            "South Sudan",
-            "South Sudanese",
-            "SS",
-            "Sud-Soudanais",
-            "Sud-Soudanaise"
-          ]
-        },
-        {
           "canonical": "STP",
           "aliases": [
             "Democratic Republic of São Tomé and Príncipe",
@@ -2950,7 +2997,6 @@
             "Santoméen",
             "Santoméenne",
             "Sao Tome and Principe",
-            "São Tomé and Príncipe",
             "São Tomé e Príncipe",
             "Sao Tomé-et-Principe",
             "São Tomé & Príncipe",
@@ -2991,7 +3037,6 @@
             "Republika Slovenija",
             "SI",
             "Slovene",
-            "Slovène",
             "Slovenia",
             "Slovénie",
             "Slovenija"
@@ -3016,23 +3061,12 @@
           "canonical": "SWZ",
           "aliases": [
             "Eswatini",
-            "eSwatini",
             "Kingdom of Eswatini",
             "Swazi",
             "Swazie",
             "Swaziland",
             "SZ",
             "Umbuso weSwatini"
-          ]
-        },
-        {
-          "canonical": "SXM",
-          "aliases": [
-            "Saint-Martin (partie néerlandaise)",
-            "Sint Maarten",
-            "Sint Maarten (Dutch part)",
-            "St. Maartener",
-            "SX"
           ]
         },
         {
@@ -3060,6 +3094,18 @@
             "Syrienne",
             "الجمهورية العربية السورية",
             "سوريا"
+          ]
+        },
+        {
+          "canonical": "T6A",
+          "aliases": [
+            "Quốc gia thử A"
+          ]
+        },
+        {
+          "canonical": "T6B",
+          "aliases": [
+            "Quốc gia thử B"
           ]
         },
         {
@@ -3145,8 +3191,6 @@
             "Turkmen",
             "Turkmène",
             "Turkmenistan",
-            "Turkménistan",
-            "Türkmenistan",
             "Туркменистан",
             "Туркмения"
           ]
@@ -3155,18 +3199,21 @@
           "canonical": "TLS",
           "aliases": [
             "Democratic Republic of Timor-Leste",
-            "East Timor",
             "East Timorese",
             "Est-timorais",
             "Est-timoraise",
             "República Democrática de Timor-Leste",
             "Repúblika Demokrátika Timór-Leste",
             "Timor-Leste",
-            "Timór-Leste",
             "Timor oriental",
-            "Timor-Oriental",
             "TL",
             "Đông Timor"
+          ]
+        },
+        {
+          "canonical": "TMP",
+          "aliases": [
+            "East Timor"
           ]
         },
         {
@@ -3237,7 +3284,6 @@
           "aliases": [
             "Republic of China (Taiwan)",
             "Taiwan",
-            "Taïwan",
             "Taiwan, Province of China",
             "Taïwanais",
             "Taïwanaise",
@@ -3295,6 +3341,13 @@
             "U.S. Outlying Islands",
             "UM",
             "United States Minor Outlying Islands"
+          ]
+        },
+        {
+          "canonical": "UNO",
+          "aliases": [
+            "United Nations",
+            "United Nations Organization"
           ]
         },
         {
@@ -3410,8 +3463,6 @@
             "Cộng hòa xã hội chủ nghĩa Việt Nam",
             "Socialist Republic of Vietnam",
             "Viet Nam",
-            "Viêt Nam",
-            "Việt Nam",
             "Vietnam",
             "Vietnamese",
             "Vietnamien",
@@ -3440,7 +3491,6 @@
             "Wallis and Futuna",
             "Wallis and Futuna Islander",
             "Wallis et Futuna",
-            "Wallis-et-Futuna",
             "Wallis & Futuna",
             "Wallis và Futuna",
             "WF"
@@ -3452,7 +3502,6 @@
             "Independent State of Samoa",
             "Malo Saʻoloto Tutoʻatasi o Sāmoa",
             "Samoa",
-            "Sāmoa",
             "WS"
           ]
         },
@@ -3462,7 +3511,6 @@
             "Republic of Yemen",
             "YE",
             "Yemen",
-            "Yémen",
             "Yemeni",
             "Yéménite",
             "الجمهورية اليمنية",
@@ -3470,11 +3518,16 @@
           ]
         },
         {
+          "canonical": "YUG",
+          "aliases": [
+            "Yugoslavia"
+          ]
+        },
+        {
           "canonical": "ZAF",
           "aliases": [
             "Aforika Borwa",
             "Afrika Borwa",
-            "Afrika-Borwa",
             "Afrika Dzonga",
             "Afrique du Sud",
             "Afurika Tshipembe",
@@ -3487,7 +3540,6 @@
             "Ningizimu Afrika",
             "Rephaboliki ya Aforika Borwa",
             "Rephaboliki ya Afrika Borwa",
-            "Rephaboliki ya Afrika-Borwa",
             "Republic of South Africa",
             "Republiek van Suid-Afrika",
             "Riphabliki ra Afrika Dzonga",
@@ -3501,6 +3553,26 @@
           ]
         },
         {
+          "canonical": "ZAR",
+          "aliases": [
+            "CD",
+            "Cộng hòa Dân chủ Congo",
+            "Congo, Democratic Republic of the",
+            "Congo (DRC)",
+            "Congo - Kinshasa",
+            "Congo (RDC)",
+            "Democratic Republic of the Congo",
+            "Ditunga dia Kongu wa Mungalaata",
+            "DR Congo",
+            "Jamhuri ya Kidemokrasia ya Kongo",
+            "RD Congo",
+            "Repubilika ya Kongo Demokratiki",
+            "Republiki ya Kongó Demokratiki",
+            "République démocratique du Congo",
+            "Zaire"
+          ]
+        },
+        {
           "canonical": "ZMB",
           "aliases": [
             "Republic of Zambia",
@@ -3510,6 +3582,30 @@
             "Zambien",
             "Zambienne",
             "ZM"
+          ]
+        },
+        {
+          "canonical": "Zoz6l6",
+          "aliases": [
+            "Quốc gia kiểm thử Zoz6l6"
+          ]
+        },
+        {
+          "canonical": "Zpkv5h",
+          "aliases": [
+            "Quốc gia kiểm thử Zpkv5h"
+          ]
+        },
+        {
+          "canonical": "ZT621A",
+          "aliases": [
+            "Mục thử ZT621A trùng"
+          ]
+        },
+        {
+          "canonical": "ZT621B",
+          "aliases": [
+            "Mục thử ZT621B"
           ]
         },
         {
@@ -3540,6 +3636,7 @@
   "sources": {
     "country_codes": "ISO 3166-1 alpha-3 (249 current entries)",
     "localized_names": "Unicode CLDR 49: en, vi, fr",
-    "native_names_and_demonyms": "mledoze/countries snapshot 2026-11-14"
+    "native_names_and_demonyms": "mledoze/countries snapshot 2026-11-14",
+    "business_nationality_codes": "Authoritative 285-code business catalog supplied 2026-11-14"
   }
 }

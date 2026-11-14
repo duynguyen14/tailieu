@@ -111,3 +111,41 @@ def test_business_catalog_disambiguates_iso_code_from_localized_alias() -> None:
     assert mapper.map_value("nationality", "NGA") == ("NGA", "EXACT")
     assert mapper.map_value("nationality", "Nga") == ("RUS", "ALIAS")
     assert mapper.map_value("nationality", "ZZZ") == (None, "UNMAPPED")
+
+
+def test_business_nationality_catalog_uses_authoritative_285_codes() -> None:
+    mapper = BusinessCatalogMapper.from_settings(Settings(_env_file=None))
+    nationality = mapper._catalogs["nationality"]
+
+    assert len(nationality.canonical_values) == 285
+    assert {
+        "0RQ",
+        "CNA",
+        "GBD",
+        "OTH",
+        "RKS",
+        "ROM",
+        "TMP",
+        "UNO",
+        "YUG",
+        "ZAR",
+    } <= nationality.canonical_values
+    assert {
+        "ALA",
+        "BES",
+        "BLM",
+        "COD",
+        "CUW",
+        "GBR",
+        "GGY",
+        "IMN",
+        "JEY",
+        "MAF",
+        "SSD",
+        "SXM",
+    }.isdisjoint(nationality.canonical_values)
+    assert mapper.map_value("nationality", "Trung Quốc") == ("CNA", "ALIAS")
+    assert mapper.map_value("nationality", "Kosovo") == ("RKS", "ALIAS")
+    assert mapper.map_value("nationality", "Khác") == ("OTH", "ALIAS")
+    assert mapper.map_value("nationality", "COD") == (None, "UNMAPPED")
+    assert mapper.map_value("nationality", "GBR") == (None, "UNMAPPED")
