@@ -425,6 +425,10 @@ class VisaFormAnnotationService:
                     .order_by(*order)
                     .limit(1)
                 )
+                if annotation_id is not None:
+                    ordered_ids = list(session.scalars(all_active_query).all())
+                    if annotation_id in ordered_ids:
+                        current_index = ordered_ids.index(annotation_id)
 
             annotation = None
             if annotation_id is not None:
