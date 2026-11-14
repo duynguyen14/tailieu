@@ -1,0 +1,49 @@
+# syntax=docker/dockerfile:1.7
+
+ARG PYTHON_VERSION=3.10
+
+FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime-base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=1000 \
+    PIP_RETRIES=20
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        curl \
+        libgl1 \
+        libglib2.0-0 \
+        libgomp1 \
+        libodbc2 \
+    && rm -rf /var/lib/apt/lists/*
+
+
+FROM runtime-base AS api-runtime
+
+COPY requirements.txt requirements-production-api-service.txt ./
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install -r requirements-production-api-service.txt
+
+COPY app ./app
+COPY config ./config
+
+EXPOSE 8002
+
+CMD ["python", "-m", "uvicorn", "app.production_main:app", "--host", "0.0.0.0", "--port", "8002", "--workers", "1"]
+
+
+FROM runtime-base AS paddle-runtime
+
+COPY requirements.txt requirements-ocr-gpu.txt requirements-production-ocr-service.txt ./
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install -r requirements-production-ocr-service.txt
+
+COPY app ./app
+COPY config ./config
+
+EXPOSE 8001 8007
+

@@ -166,3 +166,45 @@ curl -X POST http://127.0.0.1:8002/api/v1/document-extractions \
 Both services are single-flight. Concurrent work receives HTTP 429 rather than
 competing for GPU memory. The production path is stateless and does not write
 the extraction to the annotation database.
+
+## Docker Compose deployment
+
+`docker-compose.production.yml` packages the four production processes while
+preserving CUDA isolation:
+
+- vLLM 0.32 on host GPU `${VLLM_GPU_ID:-0}`;
+- Paddle page OCR on host GPU `${OCR_GPU_ID:-1}`;
+- passport MRZ Paddle runtime on host GPU `${PASSPORT_MRZ_GPU_ID:-2}`;
+- the public orchestration API on port `${PRODUCTION_PUBLIC_PORT:-8002}`.
+
+The selected physical GPU is exposed as `cuda:0` inside each container.  Model
+artifacts remain on the host and are mounted read-only, so rebuilding an image
+does not copy or duplicate model weights.
+
+Required host files are checked by the startup script.  After configuring
+`PRODUCTION_API_KEY` and optional GPU IDs in `.env`, start everything with:
+
+```bash
+bash deploy/production-up.sh
+```
+
+Equivalent raw Compose command:
+
+```bash
+docker compose -f docker-compose.production.yml --env-file .env \
+  up -d --build --remove-orphans
+```
+
+Inspect status and logs:
+
+```bash
+docker compose -f docker-compose.production.yml ps
+docker compose -f docker-compose.production.yml logs -f
+```
+
+Stop the complete stack without deleting model artifacts or the Paddle model
+cache volume:
+
+```bash
+docker compose -f docker-compose.production.yml down
+```

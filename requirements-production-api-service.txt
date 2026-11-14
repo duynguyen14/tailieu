@@ -1,0 +1,8 @@
+# Public orchestration API for the split Docker runtime.
+# Torch/Accelerate are intentionally absent: generation is delegated to vLLM.
+-r requirements.txt
+
+# Keep prompt/tokenizer behavior aligned with the validated vLLM 0.32 stack.
+transformers==5.19.0
+sentencepiece>=0.2,<1.0
+

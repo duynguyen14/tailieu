@@ -1,0 +1,241 @@
+name: document-extraction-production
+
+x-common: &common
+  restart: unless-stopped
+  networks:
+    - extraction
+  init: true
+
+x-paddle-image: &paddle-image
+  image: document-extraction-paddle:3.3.1
+  build:
+    context: .
+    dockerfile: Dockerfile.production
+    target: paddle-runtime
+
+services:
+  vllm:
+    image: vllm/vllm-openai:v0.32.0
+    restart: unless-stopped
+    networks:
+      - extraction
+    init: true
+    ipc: host
+    environment:
+      VLLM_USE_FLASHINFER_SAMPLER: "0"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      - ./output/student_extractor_qwen3_1_7b_augmented_v9/merged_model:/models/student:ro
+    command:
+      - /models/student
+      - --served-model-name
+      - student-extractor
+      - --dtype
+      - bfloat16
+      - --max-model-len
+      - "8192"
+      - --gpu-memory-utilization
+      - ${VLLM_GPU_MEMORY_UTILIZATION:-0.50}
+      - --enable-prefix-caching
+      - --generation-config
+      - vllm
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8005"
+    ports:
+      - 127.0.0.1:8005:8005
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${VLLM_GPU_ID:-0}"]
+              capabilities: [gpu]
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8005/v1/models', timeout=5)
+      interval: 10s
+      timeout: 8s
+      retries: 90
+      start_period: 10m
+
+  passport-mrz:
+    <<: [*common, *paddle-image]
+    command:
+      - python
+      - -m
+      - uvicorn
+      - app.passport_mrz_main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8007"
+      - --workers
+      - "1"
+    environment:
+      APP_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PASSPORT_MRZ_SERVICE_ENABLED: "true"
+      PASSPORT_MRZ_DETECTOR_MODEL_PATH: /models/passport_mrz/detector.onnx
+      PASSPORT_MRZ_DETECTOR_DEVICE: cpu
+      PASSPORT_MRZ_OCR_MODEL_DIR: /models/passport_mrz/recognition
+      PASSPORT_MRZ_OCR_DICT_PATH: /models/passport_mrz/recognition/mrz_dict.txt
+      PASSPORT_MRZ_OCR_DEVICE: cuda
+      PASSPORT_MRZ_OCR_GPU_DEVICE_ID: "0"
+      PASSPORT_MRZ_PRELOAD_MODELS: "true"
+      PASSPORT_MRZ_WARMUP_MODELS: "true"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      - ./models/passport_mrz:/models/passport_mrz:ro
+      - ${PADDLEX_CACHE_DIR:-/home/nab/.paddlex}:/root/.paddlex
+    ports:
+      - 127.0.0.1:8007:8007
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${PASSPORT_MRZ_GPU_ID:-2}"]
+              capabilities: [gpu]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import json, urllib.request;
+          data=json.load(urllib.request.urlopen('http://127.0.0.1:8007/internal/v1/passports/readiness', timeout=5));
+          assert data.get('ready'), data
+      interval: 10s
+      timeout: 8s
+      retries: 60
+      start_period: 5m
+
+  ocr:
+    <<: [*common, *paddle-image]
+    depends_on:
+      passport-mrz:
+        condition: service_healthy
+    command:
+      - python
+      - -m
+      - uvicorn
+      - app.production_ocr_main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8001"
+      - --workers
+      - "1"
+    environment:
+      APP_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PAGE_CLASSIFIER_MODEL_PATH: /models/page_classifier/model.onnx
+      PAGE_CLASSIFIER_LABELS_PATH: /models/page_classifier/labels.json
+      OCR_RUNTIME_DEVICE: cuda
+      OCR_RUNTIME_GPU_DEVICE_ID: "0"
+      OCR_RUNTIME_ALLOW_CPU_FALLBACK: "false"
+      OCR_DETECTION_MODEL_NAME: PP-OCRv6_medium_det
+      OCR_DETECTION_MODEL_DIR: ""
+      OCR_RECOGNITION_MODEL_NAME: latin_PP-OCRv5_mobile_rec
+      OCR_RECOGNITION_MODEL_DIR: /models/ocr-recognition
+      OCR_RECOGNITION_BATCH_SIZE: "16"
+      PRODUCTION_OCR_SERVICE_ENABLED: "true"
+      PRODUCTION_OCR_CLASSIFIER_DEVICE: cpu
+      PRODUCTION_PASSPORT_SERVICE_ENABLED: "true"
+      PRODUCTION_PASSPORT_SERVICE_URL: http://passport-mrz:8007/internal/v1/passports
+      PRODUCTION_PASSPORT_SERVICE_TIMEOUT_SECONDS: "5"
+      PRODUCTION_PASSPORT_PAGE_TYPES: PASSPORT_FRONT
+      PRODUCTION_OCR_ENABLE_REFINEMENT: "false"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      - ./models/page_classifier:/models/page_classifier:ro
+      - ./output/ocr_recognition_latin_ppocrv5_mobile_phase3_v3/inference:/models/ocr-recognition:ro
+      - ${PADDLEX_CACHE_DIR:-/home/nab/.paddlex}:/root/.paddlex
+    ports:
+      - 127.0.0.1:8001:8001
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${OCR_GPU_ID:-1}"]
+              capabilities: [gpu]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import json, urllib.request;
+          data=json.load(urllib.request.urlopen('http://127.0.0.1:8001/internal/v1/ocr/readiness', timeout=5));
+          assert data.get('ready'), data
+      interval: 10s
+      timeout: 8s
+      retries: 90
+      start_period: 10m
+
+  api:
+    <<: *common
+    image: document-extraction-api:production
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+      target: api-runtime
+    depends_on:
+      vllm:
+        condition: service_healthy
+      ocr:
+        condition: service_healthy
+    environment:
+      APP_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CORS_ORIGINS: "*"
+      PRODUCTION_API_KEY: ${PRODUCTION_API_KEY:-9148fca3-187c-46d1-95d5-5c8c4b8ea1ad}
+      PRODUCTION_API_KEY_HEADER: ${PRODUCTION_API_KEY_HEADER:-X-API-Key}
+      PRODUCTION_EXTRACTION_ENABLED: "true"
+      PRODUCTION_SPLIT_RUNTIME: "true"
+      PRODUCTION_REQUIRE_GPU: "false"
+      PRODUCTION_WARMUP_MODELS: "true"
+      PRODUCTION_OCR_SERVICE_ENABLED: "true"
+      PRODUCTION_OCR_SERVICE_URL: http://ocr:8001/internal/v1/ocr
+      PRODUCTION_OCR_SERVICE_TIMEOUT_SECONDS: "300"
+      PRODUCTION_STUDENT_API_BASE_URL: http://vllm:8005/v1
+      PRODUCTION_STUDENT_API_MODEL: student-extractor
+      PRODUCTION_STUDENT_MODEL_DIR: /models/student
+      PRODUCTION_STUDENT_MAX_INPUT_TOKENS: "4096"
+      PRODUCTION_STUDENT_MAX_NEW_TOKENS: "2048"
+      PRODUCTION_CATALOG_MAPPING_ENABLED: "true"
+      PRODUCTION_CATALOG_PATH: /app/config/business_catalog.v1.json
+      PRODUCTION_INCLUDE_RECONSTRUCTED_TEXT: "false"
+    volumes:
+      - ./config:/app/config:ro
+      - ./output/student_extractor_qwen3_1_7b_augmented_v9/merged_model:/models/student:ro
+    ports:
+      - ${PRODUCTION_PUBLIC_PORT:-8002}:8002
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import json, urllib.request;
+          data=json.load(urllib.request.urlopen('http://127.0.0.1:8002/api/v1/document-extractions/readiness', timeout=5));
+          assert data.get('ready'), data
+      interval: 10s
+      timeout: 8s
+      retries: 60
+      start_period: 3m
+
+networks:
+  extraction:
+    driver: bridge
+
