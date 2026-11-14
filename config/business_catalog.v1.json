@@ -1,39 +1,166 @@
 {
-  "version": "business-catalog-v1",
+  "version": "business-catalog-v2",
   "catalogs": {
     "gender": {
       "on_unmapped": "null",
       "items": [
-        {"canonical": "M", "aliases": ["M", "Male", "Nam", "Mr", "Ông"]},
-        {"canonical": "F", "aliases": ["F", "Female", "Nữ", "Ms", "Mrs", "Bà"]},
-        {"canonical": "X", "aliases": ["X", "Unspecified", "Không xác định"]}
+        {
+          "canonical": "M",
+          "aliases": [
+            "M",
+            "Male",
+            "Nam",
+            "Mr",
+            "Ông",
+            "Homme",
+            "Masculin"
+          ]
+        },
+        {
+          "canonical": "F",
+          "aliases": [
+            "F",
+            "Female",
+            "Nữ",
+            "Ms",
+            "Mrs",
+            "Bà",
+            "Femme",
+            "Féminin"
+          ]
+        },
+        {
+          "canonical": "X",
+          "aliases": [
+            "X",
+            "Unspecified",
+            "Không xác định",
+            "Non spécifié"
+          ]
+        }
       ]
     },
     "passport_type": {
       "on_unmapped": "null",
       "items": [
-        {"canonical": "P", "aliases": ["Ordinary", "Phổ thông", "P"]},
-        {"canonical": "D", "aliases": ["Diplomatic", "Ngoại giao", "D"]},
-        {"canonical": "O", "aliases": ["Official", "Công vụ", "O"]},
-        {"canonical": "S", "aliases": ["Service", "S"]}
-      ]
+        {
+          "canonical": "P",
+          "aliases": [
+            "Ordinary",
+            "Phổ thông",
+            "P",
+            "Ordinaire",
+            "Passeport ordinaire"
+          ]
+        },
+        {
+          "canonical": "D",
+          "aliases": [
+            "Diplomatic",
+            "Ngoại giao",
+            "D",
+            "Diplomatique",
+            "Passeport diplomatique"
+          ]
+        },
+        {
+          "canonical": "O",
+          "aliases": [
+            "Official",
+            "Công vụ",
+            "O",
+            "Officiel",
+            "Passeport officiel"
+          ]
+        },
+        {
+          "canonical": "S",
+          "aliases": [
+            "Service",
+            "S",
+            "Passeport de service"
+          ]
+        }
+      ],
+      "fuzzy": {
+        "enabled": true,
+        "threshold": 90.0,
+        "min_margin": 8.0,
+        "min_length": 4
+      }
     },
     "number_of_entries": {
       "on_unmapped": "null",
       "items": [
-        {"canonical": "SINGLE", "aliases": ["SINGLE", "Single entry", "Một lần", "1", "01"]},
-        {"canonical": "MULTIPLE", "aliases": ["MULTIPLE", "Multiple entry", "Multiple entries", "Nhiều lần", "Nhiều"]}
-      ]
+        {
+          "canonical": "SINGLE",
+          "aliases": [
+            "SINGLE",
+            "Single entry",
+            "Một lần",
+            "1",
+            "01",
+            "Entrée unique",
+            "Une entrée"
+          ]
+        },
+        {
+          "canonical": "MULTIPLE",
+          "aliases": [
+            "MULTIPLE",
+            "Multiple entry",
+            "Multiple entries",
+            "Nhiều lần",
+            "Nhiều",
+            "Entrées multiples",
+            "Plusieurs entrées"
+          ]
+        }
+      ],
+      "fuzzy": {
+        "enabled": true,
+        "threshold": 90.0,
+        "min_margin": 8.0,
+        "min_length": 4
+      }
     },
     "visa_type": {
       "on_unmapped": "null",
       "canonical_pattern": "^NG[0-9]+[A-Z]?$",
       "compact_uppercase": true,
       "items": [
-        {"canonical": "NG1", "aliases": ["NG1", "Thị thực NG1", "Visa NG1"]},
-        {"canonical": "NG2", "aliases": ["NG2", "Thị thực NG2", "Visa NG2"]},
-        {"canonical": "NG3", "aliases": ["NG3", "Thị thực NG3", "Visa NG3"]},
-        {"canonical": "NG4", "aliases": ["NG4", "Thị thực NG4", "Visa NG4"]}
+        {
+          "canonical": "NG1",
+          "aliases": [
+            "NG1",
+            "Thị thực NG1",
+            "Visa NG1"
+          ]
+        },
+        {
+          "canonical": "NG2",
+          "aliases": [
+            "NG2",
+            "Thị thực NG2",
+            "Visa NG2"
+          ]
+        },
+        {
+          "canonical": "NG3",
+          "aliases": [
+            "NG3",
+            "Thị thực NG3",
+            "Visa NG3"
+          ]
+        },
+        {
+          "canonical": "NG4",
+          "aliases": [
+            "NG4",
+            "Thị thực NG4",
+            "Visa NG4"
+          ]
+        }
       ]
     },
     "nationality": {
@@ -41,48 +168,3378 @@
       "canonical_pattern": "^[A-Z]{3}$",
       "compact_uppercase": true,
       "items": [
-        {"canonical": "AGO", "aliases": ["Angola", "Angolan"]},
-        {"canonical": "AUS", "aliases": ["Australia", "Australian"]},
-        {"canonical": "AUT", "aliases": ["Austria", "Austrian"]},
-        {"canonical": "BEL", "aliases": ["Belgium", "Belgian"]},
-        {"canonical": "CAN", "aliases": ["Canada", "Canadian"]},
-        {"canonical": "CHE", "aliases": ["Switzerland", "Swiss"]},
-        {"canonical": "CHN", "aliases": ["China", "Chinese"]},
-        {"canonical": "CZE", "aliases": ["Czech Republic", "Czechia", "Czech"]},
-        {"canonical": "DEU", "aliases": ["Germany", "German"]},
-        {"canonical": "DNK", "aliases": ["Denmark", "Danish"]},
-        {"canonical": "ESP", "aliases": ["Spain", "Spanish"]},
-        {"canonical": "FIN", "aliases": ["Finland", "Finnish"]},
-        {"canonical": "FRA", "aliases": ["France", "French", "Pháp"]},
-        {"canonical": "GBR", "aliases": ["United Kingdom", "British", "UK"]},
-        {"canonical": "HUN", "aliases": ["Hungary", "Hungarian"]},
-        {"canonical": "IDN", "aliases": ["Indonesia", "Indonesian"]},
-        {"canonical": "IND", "aliases": ["India", "Indian"]},
-        {"canonical": "IRL", "aliases": ["Ireland", "Irish"]},
-        {"canonical": "ITA", "aliases": ["Italy", "Italian"]},
-        {"canonical": "JPN", "aliases": ["Japan", "Japanese"]},
-        {"canonical": "KHM", "aliases": ["Cambodia", "Cambodian"]},
-        {"canonical": "KOR", "aliases": ["Korea", "South Korea", "Korean"]},
-        {"canonical": "LAO", "aliases": ["Laos", "Lao"]},
-        {"canonical": "MYS", "aliases": ["Malaysia", "Malaysian"]},
-        {"canonical": "MOZ", "aliases": ["Mozambique", "Mozambican"]},
-        {"canonical": "NLD", "aliases": ["Netherlands", "Dutch"]},
-        {"canonical": "NOR", "aliases": ["Norway", "Norwegian"]},
-        {"canonical": "NZL", "aliases": ["New Zealand", "New Zealander"]},
-        {"canonical": "PHL", "aliases": ["Philippines", "Filipino"]},
-        {"canonical": "POL", "aliases": ["Poland", "Polish"]},
-        {"canonical": "RUS", "aliases": ["Russia", "Russian"]},
-        {"canonical": "SAU", "aliases": ["Saudi Arabia", "Saudi"]},
-        {"canonical": "SGP", "aliases": ["Singapore", "Singaporean"]},
-        {"canonical": "SWE", "aliases": ["Sweden", "Swedish"]},
-        {"canonical": "THA", "aliases": ["Thailand", "Thai"]},
-        {"canonical": "USA", "aliases": ["United States", "United States of America", "American", "U.S.A", "US"]},
-        {"canonical": "VNM", "aliases": ["Vietnam", "Viet Nam", "Vietnamese", "Việt Nam"]}
-      ]
+        {
+          "canonical": "ABW",
+          "aliases": [
+            "Aruba",
+            "Arubais",
+            "Arubaise",
+            "Aruban",
+            "AW"
+          ]
+        },
+        {
+          "canonical": "AFG",
+          "aliases": [
+            "AF",
+            "Afghan",
+            "Afghane",
+            "Afghanistan",
+            "Islamic Republic of Afghanistan",
+            "Owganystan",
+            "Owganystan Yslam Respublikasy",
+            "افغانستان",
+            "جمهوری اسلامی افغانستان",
+            "د افغانستان اسلامي جمهوریت"
+          ]
+        },
+        {
+          "canonical": "AGO",
+          "aliases": [
+            "Angola",
+            "Angolais",
+            "Angolaise",
+            "Angolan",
+            "Republic of Angola",
+            "República de Angola"
+          ]
+        },
+        {
+          "canonical": "AIA",
+          "aliases": [
+            "AI",
+            "Anguilla",
+            "Anguillan",
+            "Anguillane",
+            "Anguillian"
+          ]
+        },
+        {
+          "canonical": "ALA",
+          "aliases": [
+            "Åland",
+            "Åland Islands",
+            "Ålandais",
+            "Ålandaise",
+            "Ålandish",
+            "AX",
+            "Îles Åland",
+            "Landskapet Åland",
+            "Quần đảo Åland"
+          ]
+        },
+        {
+          "canonical": "ALB",
+          "aliases": [
+            "AL",
+            "Albanais",
+            "Albanaise",
+            "Albania",
+            "Albanian",
+            "Albanie",
+            "Republic of Albania",
+            "Republika e Shqipërisë",
+            "Shqipëria"
+          ]
+        },
+        {
+          "canonical": "AND",
+          "aliases": [
+            "AD",
+            "Andorra",
+            "Andorran",
+            "Andorrane",
+            "Andorre",
+            "Principality of Andorra",
+            "Principat d'Andorra"
+          ]
+        },
+        {
+          "canonical": "ARE",
+          "aliases": [
+            "AE",
+            "Các Tiểu Vương quốc Ả Rập Thống nhất",
+            "Emirati",
+            "Émirats arabes unis",
+            "Emirien",
+            "Emirienne",
+            "United Arab Emirates",
+            "الإمارات",
+            "الإمارات العربية المتحدة"
+          ]
+        },
+        {
+          "canonical": "ARG",
+          "aliases": [
+            "AR",
+            "Argentin",
+            "Argentina",
+            "Argentine",
+            "Argentine Republic",
+            "República Argentina"
+          ]
+        },
+        {
+          "canonical": "ARM",
+          "aliases": [
+            "AM",
+            "Armenia",
+            "Armenian",
+            "Arménie",
+            "Arménien",
+            "Arménienne",
+            "Republic of Armenia",
+            "Հայաստան",
+            "Հայաստանի Հանրապետություն"
+          ]
+        },
+        {
+          "canonical": "ASM",
+          "aliases": [
+            "American Samoa",
+            "American Samoan",
+            "AS",
+            "Sāmoa Amelika",
+            "Samoa américaines",
+            "Samoa thuộc Mỹ"
+          ]
+        },
+        {
+          "canonical": "ATA",
+          "aliases": [
+            "Antarctica",
+            "Antarcticain",
+            "Antarcticaine",
+            "Antarctican",
+            "Antarctique",
+            "AQ",
+            "Nam Cực"
+          ]
+        },
+        {
+          "canonical": "ATF",
+          "aliases": [
+            "French Southern and Antarctic Lands",
+            "French Southern Territories",
+            "Lãnh thổ phía Nam Thuộc Pháp",
+            "Terres australes et antarctiques françaises",
+            "Terres australes françaises",
+            "Territoire des Terres australes et antarctiques françaises",
+            "Territory of the French Southern and Antarctic Lands",
+            "TF"
+          ]
+        },
+        {
+          "canonical": "ATG",
+          "aliases": [
+            "AG",
+            "Antigua and Barbuda",
+            "Antigua & Barbuda",
+            "Antigua-et-Barbuda",
+            "Antigua và Barbuda",
+            "Antiguaise et barbudien",
+            "Antiguaise et barbudienne",
+            "Antiguan, Barbudan"
+          ]
+        },
+        {
+          "canonical": "AUS",
+          "aliases": [
+            "AU",
+            "Australia",
+            "Australian",
+            "Australie",
+            "Australien",
+            "Australienne",
+            "Commonwealth of Australia",
+            "Úc"
+          ]
+        },
+        {
+          "canonical": "AUT",
+          "aliases": [
+            "AT",
+            "Austria",
+            "Austrian",
+            "Autriche",
+            "Autrichien",
+            "Autrichienne",
+            "Österreich",
+            "Republic of Austria",
+            "Republik Österreich"
+          ]
+        },
+        {
+          "canonical": "AZE",
+          "aliases": [
+            "AZ",
+            "Azerbaïdjan",
+            "Azerbaïdjanais",
+            "Azerbaïdjanaise",
+            "Azerbaijan",
+            "Azerbaijani",
+            "Azərbaycan",
+            "Azərbaycan Respublikası",
+            "Republic of Azerbaijan",
+            "Азербайджан",
+            "Азербайджанская Республика"
+          ]
+        },
+        {
+          "canonical": "BDI",
+          "aliases": [
+            "Burundais",
+            "Burundaise",
+            "Burundi",
+            "Burundian",
+            "Republic of Burundi",
+            "Republika y'Uburundi",
+            "République du Burundi",
+            "Uburundi"
+          ]
+        },
+        {
+          "canonical": "BEL",
+          "aliases": [
+            "BE",
+            "Belge",
+            "Belgian",
+            "België",
+            "Belgien",
+            "Belgique",
+            "Belgium",
+            "Kingdom of Belgium",
+            "Königreich Belgien",
+            "Koninkrijk België",
+            "Royaume de Belgique"
+          ]
+        },
+        {
+          "canonical": "BEN",
+          "aliases": [
+            "Benin",
+            "Bénin",
+            "Beninese",
+            "Béninois",
+            "Béninoise",
+            "BJ",
+            "Republic of Benin",
+            "République du Bénin"
+          ]
+        },
+        {
+          "canonical": "BES",
+          "aliases": [
+            "Bonaire, Sint Eustatius and Saba",
+            "Bonaire, Sint Eustatius en Saba",
+            "Boneiru, Sint Eustatius y Saba",
+            "BQ",
+            "Ca-ri-bê Hà Lan",
+            "Caribbean Netherlands",
+            "Caribisch Nederland",
+            "Pays-Bas caribéens"
+          ]
+        },
+        {
+          "canonical": "BFA",
+          "aliases": [
+            "BF",
+            "Burkina Faso",
+            "Burkinabe",
+            "Burkinabé",
+            "Burkinabée",
+            "République du Burkina"
+          ]
+        },
+        {
+          "canonical": "BGD",
+          "aliases": [
+            "Bangladais",
+            "Bangladaise",
+            "Bangladesh",
+            "Bangladeshi",
+            "BD",
+            "People's Republic of Bangladesh",
+            "বাংলাদেশ",
+            "বাংলাদেশ গণপ্রজাতন্ত্রী"
+          ]
+        },
+        {
+          "canonical": "BGR",
+          "aliases": [
+            "BG",
+            "Bulgare",
+            "Bulgaria",
+            "Bulgarian",
+            "Bulgarie",
+            "Republic of Bulgaria",
+            "България",
+            "Република България"
+          ]
+        },
+        {
+          "canonical": "BHR",
+          "aliases": [
+            "Bahrain",
+            "Bahraini",
+            "Bahreïn",
+            "Bahreïnien",
+            "Bahreïnienne",
+            "BH",
+            "Kingdom of Bahrain",
+            "البحرين",
+            "مملكة البحرين"
+          ]
+        },
+        {
+          "canonical": "BHS",
+          "aliases": [
+            "Bahamas",
+            "Bahamian",
+            "Bahamien",
+            "Bahamienne",
+            "BS",
+            "Commonwealth of the Bahamas"
+          ]
+        },
+        {
+          "canonical": "BIH",
+          "aliases": [
+            "BA",
+            "Bosna i Hercegovina",
+            "Bosnia",
+            "Bosnia and Herzegovina",
+            "Bosnia & Herzegovina",
+            "Bosnia và Herzegovina",
+            "Bosnian, Herzegovinian",
+            "Bosnie-Herzégovine",
+            "Bosnien",
+            "Bosnienne",
+            "Боснa и Херцеговина"
+          ]
+        },
+        {
+          "canonical": "BLM",
+          "aliases": [
+            "Barthéloméen",
+            "Barthéloméenne",
+            "BL",
+            "Collectivité de Saint-Barthélemy",
+            "Collectivity of Saint Barthélemy",
+            "Saint Barthélemy",
+            "Saint-Barthélemy",
+            "Saint Barthélemy Islander",
+            "St. Barthélemy"
+          ]
+        },
+        {
+          "canonical": "BLR",
+          "aliases": [
+            "Belarus",
+            "Belarusian",
+            "Biélorusse",
+            "Biélorussie",
+            "BY",
+            "Republic of Belarus",
+            "Белару́сь",
+            "Беларусь",
+            "Республика Беларусь",
+            "Рэспубліка Беларусь"
+          ]
+        },
+        {
+          "canonical": "BLZ",
+          "aliases": [
+            "Belice",
+            "Belize",
+            "Belizean",
+            "Bélizien",
+            "Bélizienne",
+            "BZ"
+          ]
+        },
+        {
+          "canonical": "BMU",
+          "aliases": [
+            "Bermuda",
+            "Bermudes",
+            "Bermudian",
+            "Bermudien",
+            "Bermudienne",
+            "BM"
+          ]
+        },
+        {
+          "canonical": "BOL",
+          "aliases": [
+            "BO",
+            "Bolivia",
+            "Bolivia, Plurinational State of",
+            "Bolivian",
+            "Bolivie",
+            "Bolivien",
+            "Bolivienne",
+            "Buliwya",
+            "Buliwya Mamallaqta",
+            "Estado Plurinacional de Bolivia",
+            "Plurinational State of Bolivia",
+            "Tetã Volívia",
+            "Volívia",
+            "Wuliwya",
+            "Wuliwya Suyu"
+          ]
+        },
+        {
+          "canonical": "BRA",
+          "aliases": [
+            "BR",
+            "Brasil",
+            "Brazil",
+            "Brazilian",
+            "Brésil",
+            "Brésilien",
+            "Brésilienne",
+            "Federative Republic of Brazil",
+            "República Federativa do Brasil"
+          ]
+        },
+        {
+          "canonical": "BRB",
+          "aliases": [
+            "Barbade",
+            "Barbadian",
+            "Barbadien",
+            "Barbadienne",
+            "Barbados",
+            "BB"
+          ]
+        },
+        {
+          "canonical": "BRN",
+          "aliases": [
+            "BN",
+            "Brunei",
+            "Brunei Darussalam",
+            "Bruneian",
+            "Brunéien",
+            "Brunéienne",
+            "Nation of Brunei, Abode Damai",
+            "Nation of Brunei, Abode of Peace",
+            "Negara Brunei Darussalam"
+          ]
+        },
+        {
+          "canonical": "BTN",
+          "aliases": [
+            "Bhoutan",
+            "Bhoutanais",
+            "Bhoutanaise",
+            "Bhutan",
+            "Bhutanese",
+            "BT",
+            "Kingdom of Bhutan",
+            "འབྲུག་ཡུལ་",
+            "འབྲུག་རྒྱལ་ཁབ་"
+          ]
+        },
+        {
+          "canonical": "BVT",
+          "aliases": [
+            "Bouvet Island",
+            "Bouvetøya",
+            "BV",
+            "Île Bouvet",
+            "Đảo Bouvet"
+          ]
+        },
+        {
+          "canonical": "BWA",
+          "aliases": [
+            "Botswana",
+            "Botswanais",
+            "Botswanaise",
+            "BW",
+            "Lefatshe la Botswana",
+            "Motswana",
+            "Republic of Botswana"
+          ]
+        },
+        {
+          "canonical": "CAF",
+          "aliases": [
+            "Bêafrîka",
+            "Centrafricain",
+            "Centrafricaine",
+            "Central African",
+            "Central African Republic",
+            "CF",
+            "Cộng hòa Trung Phi",
+            "Ködörösêse tî Bêafrîka",
+            "République centrafricaine"
+          ]
+        },
+        {
+          "canonical": "CAN",
+          "aliases": [
+            "CA",
+            "Canada",
+            "Canadian",
+            "Canadien",
+            "Canadienne"
+          ]
+        },
+        {
+          "canonical": "CCK",
+          "aliases": [
+            "CC",
+            "Cocos Islander",
+            "Cocos Islands",
+            "Cocos (Keeling) Islands",
+            "Îles Cocos",
+            "Quần đảo Cocos (Keeling)",
+            "Territory of the Cocos (Keeling) Islands"
+          ]
+        },
+        {
+          "canonical": "CHE",
+          "aliases": [
+            "CH",
+            "Confédération suisse",
+            "Confederazione Svizzera",
+            "Confederaziun svizra",
+            "Schweiz",
+            "Schweizerische Eidgenossenschaft",
+            "Suisse",
+            "Svizra",
+            "Svizzera",
+            "Swiss",
+            "Swiss Confederation",
+            "Switzerland",
+            "Thụy Sĩ"
+          ]
+        },
+        {
+          "canonical": "CHL",
+          "aliases": [
+            "Chile",
+            "Chilean",
+            "Chili",
+            "Chilien",
+            "Chilienne",
+            "CL",
+            "Republic of Chile",
+            "República de Chile"
+          ]
+        },
+        {
+          "canonical": "CHN",
+          "aliases": [
+            "China",
+            "Chine",
+            "Chinese",
+            "Chinois",
+            "Chinoise",
+            "CN",
+            "People's Republic of China",
+            "Trung Quốc",
+            "中华人民共和国",
+            "中国"
+          ]
+        },
+        {
+          "canonical": "CIV",
+          "aliases": [
+            "Bờ Biển Ngà",
+            "CI",
+            "Côte d'Ivoire",
+            "Côte d’Ivoire",
+            "Ivoirien",
+            "Ivoirienne",
+            "Ivorian",
+            "Ivory Coast",
+            "Republic of Côte d'Ivoire",
+            "République de Côte d'Ivoire",
+            "République de Côte d’Ivoire"
+          ]
+        },
+        {
+          "canonical": "CMR",
+          "aliases": [
+            "Cameroon",
+            "Cameroonian",
+            "Cameroun",
+            "Camerounais",
+            "Camerounaise",
+            "CM",
+            "Republic of Cameroon",
+            "République du Cameroun"
+          ]
+        },
+        {
+          "canonical": "COD",
+          "aliases": [
+            "CD",
+            "Cộng hòa Dân chủ Congo",
+            "Congo, Democratic Republic of the",
+            "Congo (DRC)",
+            "Congo - Kinshasa",
+            "Congo-Kinshasa",
+            "Congo (RDC)",
+            "Democratic Republic of the Congo",
+            "Ditunga dia Kongu wa Mungalaata",
+            "DR Congo",
+            "Jamhuri ya Kidemokrasia ya Kongo",
+            "RD Congo",
+            "Repubilika ya Kongo Demokratiki",
+            "Republiki ya Kongó Demokratiki",
+            "République démocratique du Congo"
+          ]
+        },
+        {
+          "canonical": "COG",
+          "aliases": [
+            "CG",
+            "Cộng hòa Congo",
+            "Congo",
+            "Congo - Brazzaville",
+            "Congo-Brazzaville",
+            "Congo (Republic)",
+            "Repubilika ya Kongo",
+            "Republic of the Congo",
+            "Republíki ya Kongó",
+            "République du Congo"
+          ]
+        },
+        {
+          "canonical": "COK",
+          "aliases": [
+            "CK",
+            "Cook Islander",
+            "Cook Islands",
+            "Cookien",
+            "Cookienne",
+            "Îles Cook",
+            "Kūki 'Āirani",
+            "Quần đảo Cook"
+          ]
+        },
+        {
+          "canonical": "COL",
+          "aliases": [
+            "CO",
+            "Colombia",
+            "Colombian",
+            "Colombie",
+            "Colombien",
+            "Colombienne",
+            "Republic of Colombia",
+            "República de Colombia"
+          ]
+        },
+        {
+          "canonical": "COM",
+          "aliases": [
+            "Comoran",
+            "Comores",
+            "Comorien",
+            "Comorienne",
+            "Comoros",
+            "KM",
+            "Komori",
+            "Udzima wa Komori",
+            "Union des Comores",
+            "Union of the Comoros",
+            "الاتحاد القمري",
+            "جزر القمر"
+          ]
+        },
+        {
+          "canonical": "CPV",
+          "aliases": [
+            "Cabo Verde",
+            "Cap-verdien",
+            "Cap-verdienne",
+            "Cap-Vert",
+            "Cape Verde",
+            "Cape Verdian",
+            "CV",
+            "Republic of Cabo Verde",
+            "República de Cabo Verde"
+          ]
+        },
+        {
+          "canonical": "CRI",
+          "aliases": [
+            "Costa Rica",
+            "Costa Rican",
+            "Costaricain",
+            "Costaricaine",
+            "CR",
+            "Republic of Costa Rica",
+            "República de Costa Rica"
+          ]
+        },
+        {
+          "canonical": "CUB",
+          "aliases": [
+            "CU",
+            "Cuba",
+            "Cubain",
+            "Cubaine",
+            "Cuban",
+            "Republic of Cuba",
+            "República de Cuba"
+          ]
+        },
+        {
+          "canonical": "CUW",
+          "aliases": [
+            "Country of Curaçao",
+            "Curaçao",
+            "Curaçaoan",
+            "Curacien",
+            "Curacienne",
+            "CW",
+            "Land Curaçao",
+            "Pais Kòrsou"
+          ]
+        },
+        {
+          "canonical": "CXR",
+          "aliases": [
+            "Christmas Island",
+            "Christmas Islander",
+            "CX",
+            "Île Christmas",
+            "Territory of Christmas Island",
+            "Đảo Giáng Sinh"
+          ]
+        },
+        {
+          "canonical": "CYM",
+          "aliases": [
+            "Caïmanien",
+            "Caïmanienne",
+            "Cayman Islands",
+            "Caymanian",
+            "Îles Caïmans",
+            "KY",
+            "Quần đảo Cayman"
+          ]
+        },
+        {
+          "canonical": "CYP",
+          "aliases": [
+            "Chypre",
+            "Chypriote",
+            "CY",
+            "Cypriot",
+            "Cyprus",
+            "Kıbrıs",
+            "Kıbrıs Cumhuriyeti",
+            "Republic of Cyprus",
+            "Síp",
+            "Δημοκρατία της Κύπρος",
+            "Κύπρος"
+          ]
+        },
+        {
+          "canonical": "CZE",
+          "aliases": [
+            "Česká republika",
+            "Česko",
+            "Cộng hòa Séc",
+            "CZ",
+            "Czech",
+            "Czech Republic",
+            "Czechia",
+            "République tchèque",
+            "Séc",
+            "Tchèque",
+            "Tchéquie"
+          ]
+        },
+        {
+          "canonical": "DEU",
+          "aliases": [
+            "Allemagne",
+            "Allemand",
+            "Allemande",
+            "Bundesrepublik Deutschland",
+            "DE",
+            "Deutschland",
+            "Federal Republic of Germany",
+            "German",
+            "Germany",
+            "Đức"
+          ]
+        },
+        {
+          "canonical": "DJI",
+          "aliases": [
+            "DJ",
+            "Djibouti",
+            "Djiboutien",
+            "Djiboutienne",
+            "Republic of Djibouti",
+            "République de Djibouti",
+            "جمهورية جيبوتي",
+            "جيبوتي"
+          ]
+        },
+        {
+          "canonical": "DMA",
+          "aliases": [
+            "Commonwealth of Dominica",
+            "DM",
+            "Dominica",
+            "Dominiquais",
+            "Dominiquaise",
+            "Dominique"
+          ]
+        },
+        {
+          "canonical": "DNK",
+          "aliases": [
+            "Danemark",
+            "Danish",
+            "Danmark",
+            "Danois",
+            "Danoise",
+            "Denmark",
+            "DK",
+            "Kingdom of Denmark",
+            "Kongeriget Danmark",
+            "Đan Mạch"
+          ]
+        },
+        {
+          "canonical": "DOM",
+          "aliases": [
+            "Cộng hòa Dominica",
+            "DO",
+            "Dominicain",
+            "Dominicaine",
+            "Dominican Republic",
+            "República Dominicana",
+            "République dominicaine"
+          ]
+        },
+        {
+          "canonical": "DZA",
+          "aliases": [
+            "Algeria",
+            "Algerian",
+            "Algérie",
+            "Algérien",
+            "Algérienne",
+            "DZ",
+            "People's Democratic Republic of Algeria",
+            "الجزائر",
+            "الجمهورية الديمقراطية الشعبية الجزائرية"
+          ]
+        },
+        {
+          "canonical": "ECU",
+          "aliases": [
+            "EC",
+            "Ecuador",
+            "Ecuadorean",
+            "Équateur",
+            "Équatorien",
+            "Équatorienne",
+            "Republic of Ecuador",
+            "República del Ecuador"
+          ]
+        },
+        {
+          "canonical": "EGY",
+          "aliases": [
+            "Ai Cập",
+            "Arab Republic of Egypt",
+            "EG",
+            "Egypt",
+            "Égypte",
+            "Egyptian",
+            "Égyptien",
+            "Égyptienne",
+            "جمهورية مصر العربية",
+            "مصر"
+          ]
+        },
+        {
+          "canonical": "ERI",
+          "aliases": [
+            "ER",
+            "Eritrea",
+            "Eritrean",
+            "Érythrée",
+            "Érythréen",
+            "Érythréenne",
+            "State of Eritrea",
+            "إريتريا",
+            "دولة إريتريا",
+            "ሃገረ ኤርትራ",
+            "ኤርትራ"
+          ]
+        },
+        {
+          "canonical": "ESH",
+          "aliases": [
+            "EH",
+            "República Árabe Saharaui Democrática",
+            "Sahara Occidental",
+            "Sahara occidental",
+            "Sahrawi",
+            "Sahrawi Arab Democratic Republic",
+            "Tây Sahara",
+            "Western Sahara",
+            "الجمهورية العربية الصحراوية الديمقراطية",
+            "الصحراء الغربية"
+          ]
+        },
+        {
+          "canonical": "ESP",
+          "aliases": [
+            "ES",
+            "Espagne",
+            "Espagnol",
+            "Espagnole",
+            "España",
+            "Kingdom of Spain",
+            "Reino de España",
+            "Spain",
+            "Spanish",
+            "Tây Ban Nha"
+          ]
+        },
+        {
+          "canonical": "EST",
+          "aliases": [
+            "EE",
+            "Eesti",
+            "Eesti Vabariik",
+            "Estonia",
+            "Estonian",
+            "Estonie",
+            "Estonien",
+            "Estonienne",
+            "Republic of Estonia"
+          ]
+        },
+        {
+          "canonical": "ETH",
+          "aliases": [
+            "ET",
+            "Ethiopia",
+            "Ethiopian",
+            "Éthiopie",
+            "Éthiopien",
+            "Éthiopienne",
+            "Federal Democratic Republic of Ethiopia",
+            "ኢትዮጵያ",
+            "የኢትዮጵያ ፌዴራላዊ ዲሞክራሲያዊ ሪፐብሊክ"
+          ]
+        },
+        {
+          "canonical": "FIN",
+          "aliases": [
+            "FI",
+            "Finland",
+            "Finlandais",
+            "Finlandaise",
+            "Finlande",
+            "Finnish",
+            "Phần Lan",
+            "Republic of Finland",
+            "Republiken Finland",
+            "Suomen tasavalta",
+            "Suomi"
+          ]
+        },
+        {
+          "canonical": "FJI",
+          "aliases": [
+            "Fidji",
+            "Fidjien",
+            "Fidjienne",
+            "Fiji",
+            "Fijian",
+            "FJ",
+            "Matanitu Tugalala o Viti",
+            "Republic of Fiji",
+            "Viti",
+            "फिजी",
+            "रिपब्लिक ऑफ फीजी"
+          ]
+        },
+        {
+          "canonical": "FLK",
+          "aliases": [
+            "Falkland Islander",
+            "Falkland Islands",
+            "Falkland Islands (Islas Malvinas)",
+            "Falkland Islands (Malvinas)",
+            "FK",
+            "Îles Malouines",
+            "Îles Malouines (Îles Falkland)",
+            "Malouin",
+            "Malouinne",
+            "Quần đảo Falkland",
+            "Quần đảo Falkland (Islas Malvinas)"
+          ]
+        },
+        {
+          "canonical": "FRA",
+          "aliases": [
+            "FR",
+            "Français",
+            "Française",
+            "France",
+            "Francheniste",
+            "French",
+            "French national",
+            "French Republic",
+            "Nationalité française",
+            "Pháp",
+            "République française"
+          ]
+        },
+        {
+          "canonical": "FRO",
+          "aliases": [
+            "Faroe Islands",
+            "Faroese",
+            "Féroïen",
+            "Féroïenne",
+            "FO",
+            "Færøerne",
+            "Føroyar",
+            "Îles Féroé",
+            "Quần đảo Faroe"
+          ]
+        },
+        {
+          "canonical": "FSM",
+          "aliases": [
+            "Federated States of Micronesia",
+            "FM",
+            "Micronesia",
+            "Micronesia, Federated States of",
+            "Micronesian",
+            "Micronésie",
+            "Micronésien",
+            "Micronésienne"
+          ]
+        },
+        {
+          "canonical": "GAB",
+          "aliases": [
+            "GA",
+            "Gabon",
+            "Gabonais",
+            "Gabonaise",
+            "Gabonese",
+            "Gabonese Republic",
+            "République gabonaise"
+          ]
+        },
+        {
+          "canonical": "GBR",
+          "aliases": [
+            "Britannique",
+            "British",
+            "GB",
+            "R.-U.",
+            "Royaume-Uni",
+            "UK",
+            "United Kingdom",
+            "United Kingdom of Great Britain and Northern Ireland",
+            "Vương quốc Anh"
+          ]
+        },
+        {
+          "canonical": "GEO",
+          "aliases": [
+            "GE",
+            "Georgia",
+            "Georgian",
+            "Géorgie",
+            "Géorgien",
+            "Géorgienne",
+            "საქართველო"
+          ]
+        },
+        {
+          "canonical": "GGY",
+          "aliases": [
+            "Bailiwick of Guernsey",
+            "Bailliage de Guernesey",
+            "Dgèrnésiais",
+            "GG",
+            "Guernesey",
+            "Guernesiais",
+            "Guernesiaise",
+            "Guernsey"
+          ]
+        },
+        {
+          "canonical": "GHA",
+          "aliases": [
+            "GH",
+            "Ghana",
+            "Ghanaian",
+            "Ghanéen",
+            "Ghanéenne",
+            "Republic of Ghana"
+          ]
+        },
+        {
+          "canonical": "GIB",
+          "aliases": [
+            "GI",
+            "Gibraltar",
+            "Gibraltarien",
+            "Gibraltarienne"
+          ]
+        },
+        {
+          "canonical": "GIN",
+          "aliases": [
+            "GN",
+            "Guinea",
+            "Guinean",
+            "Guinée",
+            "Guinéen",
+            "Guinéenne",
+            "Republic of Guinea",
+            "République de Guinée"
+          ]
+        },
+        {
+          "canonical": "GLP",
+          "aliases": [
+            "GP",
+            "Guadeloupe",
+            "Guadeloupéen",
+            "Guadeloupéenne",
+            "Guadeloupian"
+          ]
+        },
+        {
+          "canonical": "GMB",
+          "aliases": [
+            "Gambia",
+            "Gambian",
+            "Gambie",
+            "Gambien",
+            "Gambienne",
+            "GM",
+            "Republic of the Gambia"
+          ]
+        },
+        {
+          "canonical": "GNB",
+          "aliases": [
+            "Bissau-Guinéen",
+            "Bissau-Guinéenne",
+            "Guiné-Bissau",
+            "Guinea-Bissau",
+            "Guinea-Bissauan",
+            "Guinée-Bissau",
+            "GW",
+            "Republic of Guinea-Bissau",
+            "República da Guiné-Bissau"
+          ]
+        },
+        {
+          "canonical": "GNQ",
+          "aliases": [
+            "Équato-guinéen",
+            "Équato-guinéenne",
+            "Equatorial Guinea",
+            "Equatorial Guinean",
+            "GQ",
+            "Guiné Equatorial",
+            "Guinea Ecuatorial",
+            "Guinea Xích Đạo",
+            "Guinée équatoriale",
+            "Republic of Equatorial Guinea",
+            "República da Guiné Equatorial",
+            "República de Guinea Ecuatorial",
+            "République de la Guinée Équatoriale"
+          ]
+        },
+        {
+          "canonical": "GRC",
+          "aliases": [
+            "GR",
+            "Grec",
+            "Grèce",
+            "Grecque",
+            "Greece",
+            "Greek",
+            "Hellenic Republic",
+            "Hy Lạp",
+            "Ελλάδα",
+            "Ελληνική Δημοκρατία"
+          ]
+        },
+        {
+          "canonical": "GRD",
+          "aliases": [
+            "GD",
+            "Grenada",
+            "Grenade",
+            "Grenadian",
+            "Grenadien",
+            "Grenadienne"
+          ]
+        },
+        {
+          "canonical": "GRL",
+          "aliases": [
+            "GL",
+            "Greenland",
+            "Greenlandic",
+            "Groenland",
+            "Groenlandais",
+            "Groenlandaise",
+            "Kalaallit Nunaat"
+          ]
+        },
+        {
+          "canonical": "GTM",
+          "aliases": [
+            "GT",
+            "Guatemala",
+            "Guatemalan",
+            "Guatémaltèque",
+            "Republic of Guatemala",
+            "República de Guatemala"
+          ]
+        },
+        {
+          "canonical": "GUF",
+          "aliases": [
+            "French Guiana",
+            "GF",
+            "Guiana",
+            "Guiana thuộc Pháp",
+            "Guianan",
+            "Guyanais",
+            "Guyanaise",
+            "Guyane",
+            "Guyane française"
+          ]
+        },
+        {
+          "canonical": "GUM",
+          "aliases": [
+            "GU",
+            "Guåhån",
+            "Guam",
+            "Guamanian"
+          ]
+        },
+        {
+          "canonical": "GUY",
+          "aliases": [
+            "Co-operative Republic of Guyana",
+            "Guyana",
+            "Guyanese",
+            "Guyanien",
+            "Guyanienne",
+            "GY"
+          ]
+        },
+        {
+          "canonical": "HKG",
+          "aliases": [
+            "HK",
+            "Hong Kong",
+            "Hồng Kông",
+            "Hong Kong SAR China",
+            "Hong Kong Special Administrative Region of the People's Republic of China",
+            "Hong Konger",
+            "Hongkongais",
+            "Hongkongaise",
+            "R.A.S. chinoise de Hong Kong",
+            "Đặc khu Hành chính Hồng Kông, Trung Quốc",
+            "中华人民共和国香港特别行政区",
+            "香港"
+          ]
+        },
+        {
+          "canonical": "HMD",
+          "aliases": [
+            "Heard and McDonald Islander",
+            "Heard Island and McDonald Islands",
+            "Heard Island & McDonald Islands",
+            "Heard & McDonald Islands",
+            "HM",
+            "Îles Heard-et-MacDonald",
+            "Quần đảo Heard và McDonald"
+          ]
+        },
+        {
+          "canonical": "HND",
+          "aliases": [
+            "HN",
+            "Honduran",
+            "Honduras",
+            "Hondurien",
+            "Hondurienne",
+            "Republic of Honduras",
+            "República de Honduras"
+          ]
+        },
+        {
+          "canonical": "HRV",
+          "aliases": [
+            "Croate",
+            "Croatia",
+            "Croatian",
+            "Croatie",
+            "HR",
+            "Hrvatska",
+            "Republic of Croatia",
+            "Republika Hrvatska"
+          ]
+        },
+        {
+          "canonical": "HTI",
+          "aliases": [
+            "Ayiti",
+            "Haiti",
+            "Haïti",
+            "Haitian",
+            "Haïtien",
+            "Haïtienne",
+            "HT",
+            "Repiblik Ayiti",
+            "Republic of Haiti",
+            "République d'Haïti"
+          ]
+        },
+        {
+          "canonical": "HUN",
+          "aliases": [
+            "Hongrie",
+            "Hongrois",
+            "Hongroise",
+            "HU",
+            "Hungarian",
+            "Hungary",
+            "Magyarország"
+          ]
+        },
+        {
+          "canonical": "IDN",
+          "aliases": [
+            "ID",
+            "Indonesia",
+            "Indonesian",
+            "Indonésie",
+            "Indonésien",
+            "Indonésienne",
+            "Republic of Indonesia",
+            "Republik Indonesia"
+          ]
+        },
+        {
+          "canonical": "IMN",
+          "aliases": [
+            "Ellan Vannin or Mannin",
+            "Île de Man",
+            "IM",
+            "Isle of Man",
+            "Mannin",
+            "Manx",
+            "Đảo Man"
+          ]
+        },
+        {
+          "canonical": "IND",
+          "aliases": [
+            "Ấn Độ",
+            "IN",
+            "Inde",
+            "India",
+            "Indian",
+            "Indien",
+            "Indienne",
+            "Republic of India",
+            "भारत",
+            "भारत गणराज्य",
+            "இந்தியா",
+            "இந்தியக் குடியரசு"
+          ]
+        },
+        {
+          "canonical": "IOT",
+          "aliases": [
+            "Archipel des Chagos",
+            "British Indian Ocean Territory",
+            "Chagos Archipelago",
+            "IO",
+            "Lãnh thổ Ấn Độ Dương thuộc Anh",
+            "Quần đảo Chagos",
+            "Territoire britannique de l’océan Indien"
+          ]
+        },
+        {
+          "canonical": "IRL",
+          "aliases": [
+            "Éire",
+            "IE",
+            "Ireland",
+            "Irish",
+            "Irlandais",
+            "Irlandaise",
+            "Irlande",
+            "Poblacht na hÉireann",
+            "Republic of Ireland"
+          ]
+        },
+        {
+          "canonical": "IRN",
+          "aliases": [
+            "IR",
+            "Iran",
+            "Iran, Islamic Republic of",
+            "Iranian",
+            "Iranien",
+            "Iranienne",
+            "Islamic Republic of Iran",
+            "ایران",
+            "جمهوری اسلامی ایران"
+          ]
+        },
+        {
+          "canonical": "IRQ",
+          "aliases": [
+            "IQ",
+            "Irak",
+            "Irakien",
+            "Irakienne",
+            "Iraq",
+            "Iraqi",
+            "Republic of Iraq",
+            "العراق",
+            "جمهورية العراق",
+            "کۆماری",
+            "کۆماری عێراق",
+            "ܩܘܼܛܢܵܐ",
+            "ܩܘܼܛܢܵܐ ܐܝܼܪܲܩ"
+          ]
+        },
+        {
+          "canonical": "ISL",
+          "aliases": [
+            "Iceland",
+            "Icelander",
+            "IS",
+            "Ísland",
+            "Islandais",
+            "Islandaise",
+            "Islande"
+          ]
+        },
+        {
+          "canonical": "ISR",
+          "aliases": [
+            "IL",
+            "Israel",
+            "Israël",
+            "Israeli",
+            "Israélien",
+            "Israélienne",
+            "State of Israel",
+            "ישראל",
+            "מדינת ישראל",
+            "إسرائيل",
+            "دولة إسرائيل"
+          ]
+        },
+        {
+          "canonical": "ITA",
+          "aliases": [
+            "IT",
+            "Italia",
+            "Italian",
+            "Italian Republic",
+            "Italie",
+            "Italien",
+            "Italienne",
+            "Italy",
+            "Repubblica italiana"
+          ]
+        },
+        {
+          "canonical": "JAM",
+          "aliases": [
+            "Jamaica",
+            "Jamaïcain",
+            "Jamaïcaine",
+            "Jamaican",
+            "Jamaïque",
+            "JM"
+          ]
+        },
+        {
+          "canonical": "JEY",
+          "aliases": [
+            "Bailiwick of Jersey",
+            "Bailliage dé Jèrri",
+            "Bailliage de Jersey",
+            "JE",
+            "Jèrri",
+            "Jersey",
+            "Jersiais",
+            "Jersiaise"
+          ]
+        },
+        {
+          "canonical": "JOR",
+          "aliases": [
+            "Hashemite Kingdom of Jordan",
+            "JO",
+            "Jordan",
+            "Jordanian",
+            "Jordanie",
+            "Jordanien",
+            "Jordanienne",
+            "الأردن",
+            "المملكة الأردنية الهاشمية"
+          ]
+        },
+        {
+          "canonical": "JPN",
+          "aliases": [
+            "Japan",
+            "Japanese",
+            "Japon",
+            "Japonais",
+            "Japonaise",
+            "JP",
+            "Nhật Bản",
+            "日本"
+          ]
+        },
+        {
+          "canonical": "KAZ",
+          "aliases": [
+            "Kazakhstan",
+            "Kazakhstanais",
+            "Kazakhstanaise",
+            "Kazakhstani",
+            "KZ",
+            "Republic of Kazakhstan",
+            "Казахстан",
+            "Республика Казахстан",
+            "Қазақстан",
+            "Қазақстан Республикасы"
+          ]
+        },
+        {
+          "canonical": "KEN",
+          "aliases": [
+            "KE",
+            "Kenya",
+            "Kenyan",
+            "Kényan",
+            "Kényane",
+            "Republic of Kenya"
+          ]
+        },
+        {
+          "canonical": "KGZ",
+          "aliases": [
+            "KG",
+            "Kirghiz",
+            "Kirghize",
+            "Kirghizstan",
+            "Kyrgyz Republic",
+            "Kyrgyzstan",
+            "Киргизия",
+            "Кыргыз Республикасы",
+            "Кыргызская Республика",
+            "Кыргызстан"
+          ]
+        },
+        {
+          "canonical": "KHM",
+          "aliases": [
+            "Cambodge",
+            "Cambodgien",
+            "Cambodgienne",
+            "Cambodia",
+            "Cambodian",
+            "Campuchia",
+            "Kâmpŭchéa",
+            "KH",
+            "Kingdom of Cambodia",
+            "ព្រះរាជាណាចក្រកម្ពុជា"
+          ]
+        },
+        {
+          "canonical": "KIR",
+          "aliases": [
+            "I-Kiribati",
+            "Independent and Sovereign Republic of Kiribati",
+            "KI",
+            "Kiribati",
+            "Kiribatien",
+            "Kiribatienne",
+            "Ribaberiki Kiribati"
+          ]
+        },
+        {
+          "canonical": "KNA",
+          "aliases": [
+            "Federation of Saint Christopher and Nevis",
+            "Kittitian or Nevisian",
+            "Kittitien-et-nevicien",
+            "Kittitienne-et-nevicienne",
+            "KN",
+            "Saint-Christophe-et-Niévès",
+            "Saint Kitts and Nevis",
+            "St. Kitts & Nevis",
+            "St. Kitts và Nevis"
+          ]
+        },
+        {
+          "canonical": "KOR",
+          "aliases": [
+            "Corée du Sud",
+            "Hàn Quốc",
+            "Korea",
+            "Korea, Republic of",
+            "Korean",
+            "KR",
+            "Republic of Korea",
+            "South Korea",
+            "South Korean",
+            "Sud-coréen",
+            "Sud-coréenne",
+            "대한민국",
+            "한국"
+          ]
+        },
+        {
+          "canonical": "KWT",
+          "aliases": [
+            "Koweït",
+            "Koweïtien",
+            "Koweïtienne",
+            "Kuwait",
+            "Kuwaiti",
+            "KW",
+            "State of Kuwait",
+            "الكويت",
+            "دولة الكويت"
+          ]
+        },
+        {
+          "canonical": "LAO",
+          "aliases": [
+            "LA",
+            "Lao People's Democratic Republic",
+            "Laos",
+            "Laotian",
+            "Laotien",
+            "Laotienne",
+            "ສປປລາວ",
+            "ສາທາລະນະ ຊາທິປະໄຕ ຄົນລາວ ຂອງ"
+          ]
+        },
+        {
+          "canonical": "LBN",
+          "aliases": [
+            "LB",
+            "Lebanese",
+            "Lebanese Republic",
+            "Lebanon",
+            "Li-băng",
+            "Liban",
+            "Libanais",
+            "Libanaise",
+            "République libanaise",
+            "الجمهورية اللبنانية",
+            "لبنان"
+          ]
+        },
+        {
+          "canonical": "LBR",
+          "aliases": [
+            "Liberia",
+            "Liberian",
+            "Libérien",
+            "Libérienne",
+            "LR",
+            "Republic of Liberia"
+          ]
+        },
+        {
+          "canonical": "LBY",
+          "aliases": [
+            "Libya",
+            "Libyan",
+            "Libye",
+            "Libyen",
+            "Libyenne",
+            "LY",
+            "State of Libya",
+            "دولة ليبيا",
+            "ليبيا"
+          ]
+        },
+        {
+          "canonical": "LCA",
+          "aliases": [
+            "LC",
+            "Saint Lucia",
+            "Saint Lucian",
+            "Saint-Lucien",
+            "Saint-Lucienne",
+            "Sainte-Lucie",
+            "St. Lucia"
+          ]
+        },
+        {
+          "canonical": "LIE",
+          "aliases": [
+            "Fürstentum Liechtenstein",
+            "LI",
+            "Liechtenstein",
+            "Liechtensteiner",
+            "Liechtensteinois",
+            "Liechtensteinoise",
+            "Principality of Liechtenstein"
+          ]
+        },
+        {
+          "canonical": "LKA",
+          "aliases": [
+            "Democratic Socialist Republic of Sri Lanka",
+            "LK",
+            "Sri Lanka",
+            "Sri-lankais",
+            "Sri-lankaise",
+            "Sri Lankan",
+            "இலங்கை",
+            "இலங்கை சனநாயக சோசலிசக் குடியரசு",
+            "ශ්‍රී ලංකා ප්‍රජාතාන්ත්‍රික සමාජවාදී ජනරජය",
+            "ශ්‍රී ලංකාව"
+          ]
+        },
+        {
+          "canonical": "LSO",
+          "aliases": [
+            "Kingdom of Lesotho",
+            "Lésothien",
+            "Lésothienne",
+            "Lesotho",
+            "LS",
+            "Mosotho"
+          ]
+        },
+        {
+          "canonical": "LTU",
+          "aliases": [
+            "Lietuva",
+            "Lietuvos Respublikos",
+            "Lithuania",
+            "Lithuanian",
+            "Lituanie",
+            "Lituanien",
+            "Lituanienne",
+            "Litva",
+            "LT",
+            "Republic of Lithuania"
+          ]
+        },
+        {
+          "canonical": "LUX",
+          "aliases": [
+            "Grand-Duché de Luxembourg",
+            "Grand Duchy of Luxembourg",
+            "Großherzogtum Luxemburg",
+            "Groussherzogtum Lëtzebuerg",
+            "Lëtzebuerg",
+            "LU",
+            "Luxembourg",
+            "Luxembourgeois",
+            "Luxembourgeoise",
+            "Luxembourger",
+            "Luxemburg"
+          ]
+        },
+        {
+          "canonical": "LVA",
+          "aliases": [
+            "Latvia",
+            "Latvian",
+            "Latvija",
+            "Latvijas Republikas",
+            "Letton",
+            "Lettone",
+            "Lettonie",
+            "LV",
+            "Republic of Latvia"
+          ]
+        },
+        {
+          "canonical": "MAC",
+          "aliases": [
+            "Macanais",
+            "Macanaise",
+            "Macanese",
+            "Macao",
+            "Macao SAR China",
+            "Macao Special Administrative Region of the People's Republic of China",
+            "Macau",
+            "MO",
+            "R.A.S. chinoise de Macao",
+            "Região Administrativa Especial de Macau da República Popular da China",
+            "Đặc khu Hành chính Macao, Trung Quốc",
+            "中华人民共和国澳门特别行政区",
+            "澳门"
+          ]
+        },
+        {
+          "canonical": "MAF",
+          "aliases": [
+            "MF",
+            "Saint Martin (French part)",
+            "Saint Martin Islander",
+            "St. Martin"
+          ]
+        },
+        {
+          "canonical": "MAR",
+          "aliases": [
+            "Kingdom of Morocco",
+            "MA",
+            "Ma-rốc",
+            "Maroc",
+            "Marocain",
+            "Marocaine",
+            "Moroccan",
+            "Morocco",
+            "المغرب",
+            "المملكة المغربية",
+            "ⵍⵎⴰⵖⵔⵉⴱ",
+            "ⵜⴰⴳⵍⴷⵉⵜ ⵏ ⵍⵎⵖⵔⵉⴱ"
+          ]
+        },
+        {
+          "canonical": "MCO",
+          "aliases": [
+            "MC",
+            "Monaco",
+            "Monegasque",
+            "Monégasque",
+            "Principality of Monaco",
+            "Principauté de Monaco"
+          ]
+        },
+        {
+          "canonical": "MDA",
+          "aliases": [
+            "MD",
+            "Moldave",
+            "Moldavie",
+            "Moldova",
+            "Moldova, Republic of",
+            "Moldovan",
+            "Republic of Moldova",
+            "Republica Moldova"
+          ]
+        },
+        {
+          "canonical": "MDG",
+          "aliases": [
+            "Madagascar",
+            "Madagasikara",
+            "Malagasy",
+            "Malgache",
+            "MG",
+            "Repoblikan'i Madagasikara",
+            "Republic of Madagascar",
+            "République de Madagascar"
+          ]
+        },
+        {
+          "canonical": "MDV",
+          "aliases": [
+            "Maldivan",
+            "Maldives",
+            "Maldivien",
+            "Maldivienne",
+            "MV",
+            "Republic of the Maldives",
+            "ދިވެހިރާއްޖޭގެ",
+            "ދިވެހިރާއްޖޭގެ ޖުމްހޫރިއްޔާ"
+          ]
+        },
+        {
+          "canonical": "MEX",
+          "aliases": [
+            "Estados Unidos Mexicanos",
+            "Mexicain",
+            "Mexicaine",
+            "Mexican",
+            "Mexico",
+            "México",
+            "Mexique",
+            "MX",
+            "United Mexican States"
+          ]
+        },
+        {
+          "canonical": "MHL",
+          "aliases": [
+            "Îles Marshall",
+            "M̧ajeļ",
+            "Marshall Islands",
+            "Marshallais",
+            "Marshallaise",
+            "Marshallese",
+            "MH",
+            "Quần đảo Marshall",
+            "Republic of the Marshall Islands"
+          ]
+        },
+        {
+          "canonical": "MKD",
+          "aliases": [
+            "Bắc Macedonia",
+            "Macédoine du Nord",
+            "Macedonian",
+            "Macédonien",
+            "Macédonienne",
+            "MK",
+            "North Macedonia",
+            "Republic of North Macedonia",
+            "Македонија",
+            "Република Северна Македонија"
+          ]
+        },
+        {
+          "canonical": "MLI",
+          "aliases": [
+            "Mali",
+            "Malian",
+            "Malien",
+            "Malienne",
+            "ML",
+            "Republic of Mali",
+            "République du Mali"
+          ]
+        },
+        {
+          "canonical": "MLT",
+          "aliases": [
+            "Malta",
+            "Maltais",
+            "Maltaise",
+            "Malte",
+            "Maltese",
+            "MT",
+            "Repubblika ta ' Malta",
+            "Republic of Malta"
+          ]
+        },
+        {
+          "canonical": "MMR",
+          "aliases": [
+            "Birman",
+            "Birmane",
+            "Burmese",
+            "MM",
+            "Myanmar",
+            "Myanmar (Birmanie)",
+            "Myanmar (Burma)",
+            "Myanmar (Miến Điện)",
+            "Republic of the Union of Myanmar",
+            "ပြည်ထောင်စု သမ္မတ မြန်မာနိုင်ငံတော်",
+            "မြန်မာ"
+          ]
+        },
+        {
+          "canonical": "MNE",
+          "aliases": [
+            "ME",
+            "Montenegrin",
+            "Monténégrin",
+            "Monténégrine",
+            "Montenegro",
+            "Monténégro",
+            "Црна Гора"
+          ]
+        },
+        {
+          "canonical": "MNG",
+          "aliases": [
+            "MN",
+            "Mông Cổ",
+            "Mongol",
+            "Mongole",
+            "Mongolia",
+            "Mongolian",
+            "Mongolie",
+            "Монгол улс"
+          ]
+        },
+        {
+          "canonical": "MNP",
+          "aliases": [
+            "Commonwealth of the Northern Mariana Islands",
+            "Îles Mariannes du Nord",
+            "MP",
+            "Na Islas Mariånas",
+            "Northern Mariana Islands",
+            "Quần đảo Bắc Mariana",
+            "Sankattan Siha Na Islas Mariånas"
+          ]
+        },
+        {
+          "canonical": "MOZ",
+          "aliases": [
+            "Moçambique",
+            "Mozambicain",
+            "Mozambicaine",
+            "Mozambican",
+            "Mozambique",
+            "MZ",
+            "Republic of Mozambique",
+            "República de Moçambique"
+          ]
+        },
+        {
+          "canonical": "MRT",
+          "aliases": [
+            "Islamic Republic of Mauritania",
+            "Mauritania",
+            "Mauritanian",
+            "Mauritanie",
+            "Mauritanien",
+            "Mauritanienne",
+            "MR",
+            "الجمهورية الإسلامية الموريتانية",
+            "موريتانيا"
+          ]
+        },
+        {
+          "canonical": "MSR",
+          "aliases": [
+            "Montserrat",
+            "Montserratian",
+            "Montserratien",
+            "Montserratienne",
+            "MS"
+          ]
+        },
+        {
+          "canonical": "MTQ",
+          "aliases": [
+            "Martinican",
+            "Martiniquais",
+            "Martiniquaise",
+            "Martinique",
+            "MQ"
+          ]
+        },
+        {
+          "canonical": "MUS",
+          "aliases": [
+            "Maurice",
+            "Mauricien",
+            "Mauricienne",
+            "Mauritian",
+            "Mauritius",
+            "Moris",
+            "MU",
+            "Republic of Mauritius",
+            "Republik Moris",
+            "République de Maurice"
+          ]
+        },
+        {
+          "canonical": "MWI",
+          "aliases": [
+            "Chalo cha Malawi, Dziko la Malaŵi",
+            "Malawi",
+            "Malaŵi",
+            "Malawian",
+            "Malawien",
+            "Malawienne",
+            "MW",
+            "Republic of Malawi"
+          ]
+        },
+        {
+          "canonical": "MYS",
+          "aliases": [
+            "Malaisie",
+            "Malaisien",
+            "Malaisienne",
+            "Malaysia",
+            "Malaysian",
+            "مليسيا"
+          ]
+        },
+        {
+          "canonical": "MYT",
+          "aliases": [
+            "Département de Mayotte",
+            "Department of Mayotte",
+            "Mahorais",
+            "Mahoraise",
+            "Mahoran",
+            "Mayotte",
+            "YT"
+          ]
+        },
+        {
+          "canonical": "NAM",
+          "aliases": [
+            "Lefatshe la Namibia",
+            "NA",
+            "Namibia",
+            "Namibian",
+            "Namibie",
+            "Namibië",
+            "Namibien",
+            "Namibienne",
+            "Republic of Namibia",
+            "Republiek van Namibië",
+            "Republik Namibia"
+          ]
+        },
+        {
+          "canonical": "NCL",
+          "aliases": [
+            "NC",
+            "Néo-Calédonien",
+            "Néo-Calédonienne",
+            "New Caledonia",
+            "New Caledonian",
+            "Nouvelle-Calédonie"
+          ]
+        },
+        {
+          "canonical": "NER",
+          "aliases": [
+            "NE",
+            "Niger",
+            "Nigerien",
+            "Nigérien",
+            "Nigérienne",
+            "Republic of Niger",
+            "République du Niger"
+          ]
+        },
+        {
+          "canonical": "NFK",
+          "aliases": [
+            "Île Norfolk",
+            "NF",
+            "Norf'k Ailen",
+            "Norfolk Island",
+            "Norfolk Islander",
+            "Norfolkais",
+            "Norfolkaise",
+            "Teratri of Norf'k Ailen",
+            "Territory of Norfolk Island",
+            "Đảo Norfolk"
+          ]
+        },
+        {
+          "canonical": "NGA",
+          "aliases": [
+            "Federal Republic of Nigeria",
+            "NG",
+            "Nigeria",
+            "Nigerian",
+            "Nigérian",
+            "Nigériane"
+          ]
+        },
+        {
+          "canonical": "NIC",
+          "aliases": [
+            "NI",
+            "Nicaragua",
+            "Nicaraguan",
+            "Nicaraguayen",
+            "Nicaraguayenne",
+            "Republic of Nicaragua",
+            "República de Nicaragua"
+          ]
+        },
+        {
+          "canonical": "NIU",
+          "aliases": [
+            "Niue",
+            "Niuē",
+            "Niuean",
+            "Niuéen",
+            "Niuéenne",
+            "NU"
+          ]
+        },
+        {
+          "canonical": "NLD",
+          "aliases": [
+            "Dutch",
+            "Hà Lan",
+            "Kingdom of the Netherlands",
+            "Koninkrijk der Nederlanden",
+            "Nederland",
+            "Netherlands",
+            "Netherlands, Kingdom of the",
+            "NL",
+            "Pays-Bas"
+          ]
+        },
+        {
+          "canonical": "NOR",
+          "aliases": [
+            "Kingdom of Norway",
+            "Kongeriket Noreg",
+            "Kongeriket Norge",
+            "Na Uy",
+            "NO",
+            "Noreg",
+            "Norge",
+            "Norgga",
+            "Norgga gonagasriika",
+            "Norvège",
+            "Norvégien",
+            "Norvégienne",
+            "Norway",
+            "Norwegian"
+          ]
+        },
+        {
+          "canonical": "NPL",
+          "aliases": [
+            "Federal Democratic Republic of Nepal",
+            "Nepal",
+            "Népal",
+            "Népalais",
+            "Népalaise",
+            "Nepalese",
+            "NP",
+            "नेपाल",
+            "नेपाल संघीय लोकतान्त्रिक गणतन्त्र"
+          ]
+        },
+        {
+          "canonical": "NRU",
+          "aliases": [
+            "Naoero",
+            "Nauru",
+            "Nauruan",
+            "Nauruane",
+            "NR",
+            "Republic of Nauru"
+          ]
+        },
+        {
+          "canonical": "NZL",
+          "aliases": [
+            "Aotearoa",
+            "Aotearoa New Zealand",
+            "Aotearoa (Nouvelle-Zélande)",
+            "Neo-Zélandais",
+            "Neo-Zélandaise",
+            "New Zealand",
+            "New Zealander",
+            "Nouvelle-Zélande",
+            "NZ"
+          ]
+        },
+        {
+          "canonical": "OMN",
+          "aliases": [
+            "OM",
+            "Oman",
+            "Omanais",
+            "Omanaise",
+            "Omani",
+            "Sultanate of Oman",
+            "سلطنة عمان",
+            "عمان"
+          ]
+        },
+        {
+          "canonical": "PAK",
+          "aliases": [
+            "Islamic Republic of Pakistan",
+            "Pakistan",
+            "Pakistanais",
+            "Pakistanaise",
+            "Pakistani",
+            "PK",
+            "اسلامی جمہوریۂ پاكستان",
+            "پاكستان"
+          ]
+        },
+        {
+          "canonical": "PAN",
+          "aliases": [
+            "PA",
+            "Panama",
+            "Panamá",
+            "Panamanian",
+            "Panaméen",
+            "Panaméenne",
+            "Republic of Panama",
+            "República de Panamá"
+          ]
+        },
+        {
+          "canonical": "PCN",
+          "aliases": [
+            "Îles Pitcairn",
+            "Pitcairn",
+            "Pitcairn Group of Islands",
+            "Pitcairn Islander",
+            "Pitcairn Islands",
+            "Pitcairnais",
+            "Pitcairnaise",
+            "PN",
+            "Quần đảo Pitcairn"
+          ]
+        },
+        {
+          "canonical": "PER",
+          "aliases": [
+            "PE",
+            "Pérou",
+            "Peru",
+            "Perú",
+            "Peruvian",
+            "Péruvien",
+            "Péruvienne",
+            "Piruw",
+            "Piruw Ripuwlika",
+            "Piruw Suyu",
+            "Republic of Peru",
+            "República del Perú"
+          ]
+        },
+        {
+          "canonical": "PHL",
+          "aliases": [
+            "Filipino",
+            "PH",
+            "Philippin",
+            "Philippine",
+            "Philippines",
+            "Pilipinas",
+            "Republic of the Philippines",
+            "Republika ng Pilipinas"
+          ]
+        },
+        {
+          "canonical": "PLW",
+          "aliases": [
+            "Belau",
+            "Beluu er a Belau",
+            "Palaos",
+            "Palau",
+            "Palauan",
+            "Paluan",
+            "Paluane",
+            "PW",
+            "Republic of Palau"
+          ]
+        },
+        {
+          "canonical": "PNG",
+          "aliases": [
+            "Independen Stet bilong Papua Niugini",
+            "Independent State of Papua New Guinea",
+            "Papouasie-Nouvelle-Guinée",
+            "Papouasien",
+            "Papouasienne",
+            "Papua New Guinea",
+            "Papua New Guinean",
+            "Papua Niu Gini",
+            "Papua Niugini",
+            "PG"
+          ]
+        },
+        {
+          "canonical": "POL",
+          "aliases": [
+            "Ba Lan",
+            "PL",
+            "Poland",
+            "Polish",
+            "Pologne",
+            "Polonais",
+            "Polonaise",
+            "Polska",
+            "Republic of Poland",
+            "Rzeczpospolita Polska"
+          ]
+        },
+        {
+          "canonical": "PRI",
+          "aliases": [
+            "Commonwealth of Puerto Rico",
+            "Estado Libre Asociado de Puerto Rico",
+            "Porto Rico",
+            "Portoricain",
+            "Portoricaine",
+            "PR",
+            "Puerto Rican",
+            "Puerto Rico"
+          ]
+        },
+        {
+          "canonical": "PRK",
+          "aliases": [
+            "Corée du Nord",
+            "Democratic People's Republic of Korea",
+            "Korea, Democratic People's Republic of",
+            "KP",
+            "Nord-coréen",
+            "Nord-coréenne",
+            "North Korea",
+            "North Korean",
+            "Triều Tiên",
+            "조선",
+            "조선민주주의인민공화국"
+          ]
+        },
+        {
+          "canonical": "PRT",
+          "aliases": [
+            "Bồ Đào Nha",
+            "Portugais",
+            "Portugaise",
+            "Portugal",
+            "Portuguese",
+            "Portuguese Republic",
+            "PT",
+            "República português"
+          ]
+        },
+        {
+          "canonical": "PRY",
+          "aliases": [
+            "Paraguái",
+            "Paraguay",
+            "Paraguayan",
+            "Paraguayen",
+            "Paraguayenne",
+            "PY",
+            "Republic of Paraguay",
+            "República de Paraguay",
+            "Tetã Paraguái"
+          ]
+        },
+        {
+          "canonical": "PSE",
+          "aliases": [
+            "Lãnh thổ Palestine",
+            "Palestine",
+            "Palestine, State of",
+            "Palestinian",
+            "Palestinian Territories",
+            "Palestinien",
+            "Palestinienne",
+            "PS",
+            "State of Palestine",
+            "Territoires palestiniens",
+            "دولة فلسطين",
+            "فلسطين"
+          ]
+        },
+        {
+          "canonical": "PYF",
+          "aliases": [
+            "French Polynesia",
+            "French Polynesian",
+            "PF",
+            "Polynesia thuộc Pháp",
+            "Polynésie française",
+            "Polynésien",
+            "Polynésienne"
+          ]
+        },
+        {
+          "canonical": "QAT",
+          "aliases": [
+            "QA",
+            "Qatar",
+            "Qatari",
+            "Qatarien",
+            "Qatarienne",
+            "State of Qatar",
+            "دولة قطر",
+            "قطر"
+          ]
+        },
+        {
+          "canonical": "REU",
+          "aliases": [
+            "Ile de la Réunion",
+            "La Réunion",
+            "RE",
+            "Réunion",
+            "Réunion Island",
+            "Réunionese",
+            "Réunionnais",
+            "Réunionnaise"
+          ]
+        },
+        {
+          "canonical": "ROU",
+          "aliases": [
+            "RO",
+            "Romania",
+            "România",
+            "Romanian",
+            "Roumain",
+            "Roumaine",
+            "Roumanie"
+          ]
+        },
+        {
+          "canonical": "RUS",
+          "aliases": [
+            "Nga",
+            "RU",
+            "Russe",
+            "Russia",
+            "Russian",
+            "Russian Federation",
+            "Russie",
+            "Российская Федерация",
+            "Россия"
+          ]
+        },
+        {
+          "canonical": "RWA",
+          "aliases": [
+            "Republic of Rwanda",
+            "République rwandaise",
+            "Repubulika y'u Rwanda",
+            "RW",
+            "Rwanda",
+            "Rwandais",
+            "Rwandaise",
+            "Rwandan"
+          ]
+        },
+        {
+          "canonical": "SAU",
+          "aliases": [
+            "Ả Rập Xê-út",
+            "Arabie saoudite",
+            "Kingdom of Saudi Arabia",
+            "SA",
+            "Saoudien",
+            "Saoudienne",
+            "Saudi",
+            "Saudi Arabia",
+            "Saudi Arabian",
+            "السعودية",
+            "المملكة العربية السعودية"
+          ]
+        },
+        {
+          "canonical": "SDN",
+          "aliases": [
+            "Republic of the Sudan",
+            "SD",
+            "Soudan",
+            "Soudanais",
+            "Soudanaise",
+            "Sudan",
+            "Sudanese",
+            "السودان",
+            "جمهورية السودان"
+          ]
+        },
+        {
+          "canonical": "SEN",
+          "aliases": [
+            "Republic of Senegal",
+            "République du Sénégal",
+            "Senegal",
+            "Sénégal",
+            "Sénégalais",
+            "Sénégalaise",
+            "Senegalese",
+            "SN"
+          ]
+        },
+        {
+          "canonical": "SGP",
+          "aliases": [
+            "Republic of Singapore",
+            "Republik Singapura",
+            "SG",
+            "Singapore",
+            "Singaporean",
+            "Singapour",
+            "Singapourien",
+            "Singapourienne",
+            "Singapura",
+            "சிங்கப்பூர்",
+            "சிங்கப்பூர் குடியரசு",
+            "新加坡",
+            "新加坡共和国"
+          ]
+        },
+        {
+          "canonical": "SGS",
+          "aliases": [
+            "Géorgie du Sud-et-les Îles Sandwich du Sud",
+            "GS",
+            "Nam Georgia & Quần đảo Nam Sandwich",
+            "South Georgia",
+            "South Georgia and the South Sandwich Islands",
+            "South Georgia & South Sandwich Islands",
+            "South Georgian South Sandwich Islander"
+          ]
+        },
+        {
+          "canonical": "SHN",
+          "aliases": [
+            "Saint Helena, Ascension and Tristan da Cunha",
+            "Saint Helenian",
+            "Sainte-Hélène",
+            "Sainte-Hélènois",
+            "Sainte-Hélénoise",
+            "SH",
+            "St. Helena",
+            "St. Helena, Ascension & Tristan da Cunha"
+          ]
+        },
+        {
+          "canonical": "SJM",
+          "aliases": [
+            "SJ",
+            "Svalbard and Jan Mayen",
+            "Svalbard et Jan Mayen",
+            "Svalbard & Jan Mayen",
+            "Svalbard og Jan Mayen",
+            "Svalbard và Jan Mayen"
+          ]
+        },
+        {
+          "canonical": "SLB",
+          "aliases": [
+            "Îles Salomon",
+            "Quần đảo Solomon",
+            "Salomonien",
+            "Salomonienne",
+            "SB",
+            "Solomon Islander",
+            "Solomon Islands"
+          ]
+        },
+        {
+          "canonical": "SLE",
+          "aliases": [
+            "Republic of Sierra Leone",
+            "Sierra-leonais",
+            "Sierra-leonaise",
+            "Sierra Leone",
+            "Sierra Leonean",
+            "SL"
+          ]
+        },
+        {
+          "canonical": "SLV",
+          "aliases": [
+            "El Salvador",
+            "Republic of El Salvador",
+            "República de El Salvador",
+            "Salvador",
+            "Salvadoran",
+            "Salvadorien",
+            "Salvadorienne",
+            "SV"
+          ]
+        },
+        {
+          "canonical": "SMR",
+          "aliases": [
+            "Most Serene Republic of San Marino",
+            "Saint-Marin",
+            "Saint-Marinais",
+            "Saint-Marinaise",
+            "Sammarinese",
+            "San Marino",
+            "Serenissima Repubblica di San Marino",
+            "SM"
+          ]
+        },
+        {
+          "canonical": "SOM",
+          "aliases": [
+            "Federal Republic of Somalia",
+            "Jamhuuriyadda Federaalka Soomaaliya",
+            "SO",
+            "Somali",
+            "Somalia",
+            "Somalie",
+            "Somalien",
+            "Somalienne",
+            "Soomaaliya",
+            "الصومال",
+            "جمهورية الصومال الفيدرالية"
+          ]
+        },
+        {
+          "canonical": "SPM",
+          "aliases": [
+            "Collectivité territoriale de Saint-Pierre-et-Miquelon",
+            "PM",
+            "Saint-Pierrais, Miquelonais",
+            "Saint-Pierrais, Miquelonnais",
+            "Saint-Pierraise, Miquelonaise",
+            "Saint Pierre and Miquelon",
+            "Saint-Pierre-et-Miquelon",
+            "Saint Pierre và Miquelon",
+            "St. Pierre & Miquelon"
+          ]
+        },
+        {
+          "canonical": "SRB",
+          "aliases": [
+            "Republic of Serbia",
+            "RS",
+            "Serbe",
+            "Serbia",
+            "Serbian",
+            "Serbie",
+            "Република Србија",
+            "Србија"
+          ]
+        },
+        {
+          "canonical": "SSD",
+          "aliases": [
+            "Nam Sudan",
+            "Republic of South Sudan",
+            "Soudan du Sud",
+            "South Sudan",
+            "South Sudanese",
+            "SS",
+            "Sud-Soudanais",
+            "Sud-Soudanaise"
+          ]
+        },
+        {
+          "canonical": "STP",
+          "aliases": [
+            "Democratic Republic of São Tomé and Príncipe",
+            "República Democrática do São Tomé e Príncipe",
+            "Santoméen",
+            "Santoméenne",
+            "Sao Tome and Principe",
+            "São Tomé and Príncipe",
+            "São Tomé e Príncipe",
+            "Sao Tomé-et-Principe",
+            "São Tomé & Príncipe",
+            "São Tomé và Príncipe",
+            "Sao Tomean",
+            "ST"
+          ]
+        },
+        {
+          "canonical": "SUR",
+          "aliases": [
+            "Republic of Suriname",
+            "Republiek Suriname",
+            "SR",
+            "Surinamais",
+            "Surinamaise",
+            "Suriname",
+            "Surinamer"
+          ]
+        },
+        {
+          "canonical": "SVK",
+          "aliases": [
+            "SK",
+            "Slovak",
+            "Slovak Republic",
+            "Slovakia",
+            "Slovaque",
+            "Slovaquie",
+            "Slovenská republika",
+            "Slovensko"
+          ]
+        },
+        {
+          "canonical": "SVN",
+          "aliases": [
+            "Republic of Slovenia",
+            "Republika Slovenija",
+            "SI",
+            "Slovene",
+            "Slovène",
+            "Slovenia",
+            "Slovénie",
+            "Slovenija"
+          ]
+        },
+        {
+          "canonical": "SWE",
+          "aliases": [
+            "Kingdom of Sweden",
+            "Konungariket Sverige",
+            "SE",
+            "Suède",
+            "Suédois",
+            "Suédoise",
+            "Sverige",
+            "Sweden",
+            "Swedish",
+            "Thụy Điển"
+          ]
+        },
+        {
+          "canonical": "SWZ",
+          "aliases": [
+            "Eswatini",
+            "eSwatini",
+            "Kingdom of Eswatini",
+            "Swazi",
+            "Swazie",
+            "Swaziland",
+            "SZ",
+            "Umbuso weSwatini"
+          ]
+        },
+        {
+          "canonical": "SXM",
+          "aliases": [
+            "Saint-Martin (partie néerlandaise)",
+            "Sint Maarten",
+            "Sint Maarten (Dutch part)",
+            "St. Maartener",
+            "SX"
+          ]
+        },
+        {
+          "canonical": "SYC",
+          "aliases": [
+            "Repiblik Sesel",
+            "Republic of Seychelles",
+            "République des Seychelles",
+            "SC",
+            "Sesel",
+            "Seychelles",
+            "Seychellois",
+            "Seychelloise"
+          ]
+        },
+        {
+          "canonical": "SYR",
+          "aliases": [
+            "SY",
+            "Syria",
+            "Syrian",
+            "Syrian Arab Republic",
+            "Syrie",
+            "Syrien",
+            "Syrienne",
+            "الجمهورية العربية السورية",
+            "سوريا"
+          ]
+        },
+        {
+          "canonical": "TCA",
+          "aliases": [
+            "Îles Turques-et-Caïques",
+            "Quần đảo Turks và Caicos",
+            "TC",
+            "Turks and Caicos Islander",
+            "Turks and Caicos Islands",
+            "Turks & Caicos Islands"
+          ]
+        },
+        {
+          "canonical": "TCD",
+          "aliases": [
+            "Chad",
+            "Chadian",
+            "Republic of Chad",
+            "République du Tchad",
+            "Tchad",
+            "Tchadien",
+            "Tchadienne",
+            "TD",
+            "تشاد",
+            "جمهورية تشاد"
+          ]
+        },
+        {
+          "canonical": "TGO",
+          "aliases": [
+            "République togolaise",
+            "TG",
+            "Togo",
+            "Togolais",
+            "Togolaise",
+            "Togolese",
+            "Togolese Republic"
+          ]
+        },
+        {
+          "canonical": "THA",
+          "aliases": [
+            "Kingdom of Thailand",
+            "TH",
+            "Thai",
+            "Thái Lan",
+            "Thailand",
+            "Thaïlandais",
+            "Thaïlandaise",
+            "Thaïlande",
+            "ประเทศไทย",
+            "ราชอาณาจักรไทย"
+          ]
+        },
+        {
+          "canonical": "TJK",
+          "aliases": [
+            "Republic of Tajikistan",
+            "Tadjike",
+            "Tadjikistan",
+            "Tadzhik",
+            "Tajikistan",
+            "TJ",
+            "Республика Таджикистан",
+            "Таджикистан",
+            "Тоҷикистон",
+            "Ҷумҳурии Тоҷикистон"
+          ]
+        },
+        {
+          "canonical": "TKL",
+          "aliases": [
+            "TK",
+            "Tokelau",
+            "Tokelauan"
+          ]
+        },
+        {
+          "canonical": "TKM",
+          "aliases": [
+            "TM",
+            "Turkmen",
+            "Turkmène",
+            "Turkmenistan",
+            "Turkménistan",
+            "Türkmenistan",
+            "Туркменистан",
+            "Туркмения"
+          ]
+        },
+        {
+          "canonical": "TLS",
+          "aliases": [
+            "Democratic Republic of Timor-Leste",
+            "East Timor",
+            "East Timorese",
+            "Est-timorais",
+            "Est-timoraise",
+            "República Democrática de Timor-Leste",
+            "Repúblika Demokrátika Timór-Leste",
+            "Timor-Leste",
+            "Timór-Leste",
+            "Timor oriental",
+            "Timor-Oriental",
+            "TL",
+            "Đông Timor"
+          ]
+        },
+        {
+          "canonical": "TON",
+          "aliases": [
+            "Kingdom of Tonga",
+            "TO",
+            "Tonga",
+            "Tongan",
+            "Tonguien",
+            "Tonguienne"
+          ]
+        },
+        {
+          "canonical": "TTO",
+          "aliases": [
+            "Republic of Trinidad and Tobago",
+            "Trinidad and Tobago",
+            "Trinidad & Tobago",
+            "Trinidad và Tobago",
+            "Trinidadian",
+            "Trinidadien",
+            "Trinidadienne",
+            "Trinité-et-Tobago",
+            "TT"
+          ]
+        },
+        {
+          "canonical": "TUN",
+          "aliases": [
+            "TN",
+            "Tunisia",
+            "Tunisian",
+            "Tunisian Republic",
+            "Tunisie",
+            "Tunisien",
+            "Tunisienne",
+            "الجمهورية التونسية",
+            "تونس"
+          ]
+        },
+        {
+          "canonical": "TUR",
+          "aliases": [
+            "Republic of Türkiye",
+            "Thổ Nhĩ Kỳ",
+            "TR",
+            "Turc",
+            "Turkey",
+            "Turkish",
+            "Türkiye",
+            "Türkiye Cumhuriyeti",
+            "Turque",
+            "Turquie"
+          ]
+        },
+        {
+          "canonical": "TUV",
+          "aliases": [
+            "Tuvalu",
+            "Tuvaluan",
+            "Tuvaluane",
+            "TV"
+          ]
+        },
+        {
+          "canonical": "TWN",
+          "aliases": [
+            "Republic of China (Taiwan)",
+            "Taiwan",
+            "Taïwan",
+            "Taiwan, Province of China",
+            "Taïwanais",
+            "Taïwanaise",
+            "Taiwanese",
+            "TW",
+            "Đài Loan",
+            "中華民國",
+            "台灣"
+          ]
+        },
+        {
+          "canonical": "TZA",
+          "aliases": [
+            "Jamhuri ya Muungano wa Tanzania",
+            "Tanzania",
+            "Tanzania, United Republic of",
+            "Tanzanian",
+            "Tanzanie",
+            "Tanzanien",
+            "Tanzanienne",
+            "TZ",
+            "United Republic of Tanzania"
+          ]
+        },
+        {
+          "canonical": "UGA",
+          "aliases": [
+            "Ouganda",
+            "Ougandais",
+            "Ougandaise",
+            "Republic of Uganda",
+            "UG",
+            "Uganda",
+            "Ugandan"
+          ]
+        },
+        {
+          "canonical": "UKR",
+          "aliases": [
+            "UA",
+            "Ukraina",
+            "Ukraine",
+            "Ukrainian",
+            "Ukrainien",
+            "Ukrainienne",
+            "Україна"
+          ]
+        },
+        {
+          "canonical": "UMI",
+          "aliases": [
+            "American Islander",
+            "Các tiểu đảo xa của Hoa Kỳ",
+            "Îles mineures éloignées des États-Unis",
+            "U.S. Outlying Islands",
+            "UM",
+            "United States Minor Outlying Islands"
+          ]
+        },
+        {
+          "canonical": "URY",
+          "aliases": [
+            "Oriental Republic of Uruguay",
+            "República Oriental del Uruguay",
+            "Uruguay",
+            "Uruguayan",
+            "Uruguayen",
+            "Uruguayenne",
+            "UY"
+          ]
+        },
+        {
+          "canonical": "USA",
+          "aliases": [
+            "Américain",
+            "American",
+            "É.-U.",
+            "États-Unis",
+            "Hoa Kỳ",
+            "U.S.A",
+            "United States",
+            "United States of America",
+            "US"
+          ]
+        },
+        {
+          "canonical": "UZB",
+          "aliases": [
+            "O‘zbekiston",
+            "O'zbekiston Respublikasi",
+            "Ouzbèke",
+            "Ouzbékistan",
+            "Republic of Uzbekistan",
+            "UZ",
+            "Uzbekistan",
+            "Uzbekistani",
+            "Республика Узбекистан",
+            "Узбекистан"
+          ]
+        },
+        {
+          "canonical": "VAT",
+          "aliases": [
+            "État de la Cité du Vatican",
+            "Holy See",
+            "Stato della Città del Vaticano",
+            "Status Civitatis Vaticanæ",
+            "Thành Vatican",
+            "VA",
+            "Vatican",
+            "Vatican City",
+            "Vatican City State",
+            "Vaticane",
+            "Vaticano",
+            "Vaticanæ"
+          ]
+        },
+        {
+          "canonical": "VCT",
+          "aliases": [
+            "Saint Vincent and the Grenadines",
+            "Saint-Vincent-et-les Grenadines",
+            "Saint Vincentian",
+            "St. Vincent & Grenadines",
+            "St. Vincent và Grenadines",
+            "VC",
+            "Vincentais",
+            "Vincentaise"
+          ]
+        },
+        {
+          "canonical": "VEN",
+          "aliases": [
+            "Bolivarian Republic of Venezuela",
+            "República Bolivariana de Venezuela",
+            "VE",
+            "Venezuela",
+            "Venezuela, Bolivarian Republic of",
+            "Venezuelan",
+            "Vénézuélien",
+            "Vénézuélienne"
+          ]
+        },
+        {
+          "canonical": "VGB",
+          "aliases": [
+            "British Virgin Islands",
+            "Îles Vierges britanniques",
+            "Quần đảo Virgin thuộc Anh",
+            "VG",
+            "Virgin Islands",
+            "Virgin Islands (British)"
+          ]
+        },
+        {
+          "canonical": "VIR",
+          "aliases": [
+            "Îles Vierges des États-Unis",
+            "Quần đảo Virgin thuộc Hoa Kỳ",
+            "U.S. Virgin Islands",
+            "United States Virgin Islands",
+            "VI",
+            "Virgin Islands of the United States",
+            "Virgin Islands (U.S.)"
+          ]
+        },
+        {
+          "canonical": "VNM",
+          "aliases": [
+            "Cộng hòa xã hội chủ nghĩa Việt Nam",
+            "Socialist Republic of Vietnam",
+            "Viet Nam",
+            "Viêt Nam",
+            "Việt Nam",
+            "Vietnam",
+            "Vietnamese",
+            "Vietnamien",
+            "Vietnamienne",
+            "VN"
+          ]
+        },
+        {
+          "canonical": "VUT",
+          "aliases": [
+            "Ni-Vanuatu",
+            "Republic of Vanuatu",
+            "République de Vanuatu",
+            "Ripablik blong Vanuatu",
+            "Vanuatu",
+            "Vanuatuan",
+            "Vanuatuane",
+            "VU"
+          ]
+        },
+        {
+          "canonical": "WLF",
+          "aliases": [
+            "Territoire des îles Wallis et Futuna",
+            "Territory of the Wallis and Futuna Islands",
+            "Wallis and Futuna",
+            "Wallis and Futuna Islander",
+            "Wallis et Futuna",
+            "Wallis-et-Futuna",
+            "Wallis & Futuna",
+            "Wallis và Futuna",
+            "WF"
+          ]
+        },
+        {
+          "canonical": "WSM",
+          "aliases": [
+            "Independent State of Samoa",
+            "Malo Saʻoloto Tutoʻatasi o Sāmoa",
+            "Samoa",
+            "Sāmoa",
+            "WS"
+          ]
+        },
+        {
+          "canonical": "YEM",
+          "aliases": [
+            "Republic of Yemen",
+            "YE",
+            "Yemen",
+            "Yémen",
+            "Yemeni",
+            "Yéménite",
+            "الجمهورية اليمنية",
+            "اليمن"
+          ]
+        },
+        {
+          "canonical": "ZAF",
+          "aliases": [
+            "Aforika Borwa",
+            "Afrika Borwa",
+            "Afrika-Borwa",
+            "Afrika Dzonga",
+            "Afrique du Sud",
+            "Afurika Tshipembe",
+            "IRiphabhulikhi yeNingizimu Afrika",
+            "IRiphabliki yaseMzantsi Afrika",
+            "IRiphabliki yaseNingizimu Afrika",
+            "IRiphabliki yeSewula Afrika",
+            "Mzantsi Afrika",
+            "Nam Phi",
+            "Ningizimu Afrika",
+            "Rephaboliki ya Aforika Borwa",
+            "Rephaboliki ya Afrika Borwa",
+            "Rephaboliki ya Afrika-Borwa",
+            "Republic of South Africa",
+            "Republiek van Suid-Afrika",
+            "Riphabliki ra Afrika Dzonga",
+            "Riphabuḽiki ya Afurika Tshipembe",
+            "Sewula Afrika",
+            "South Africa",
+            "South African",
+            "Sud-africain",
+            "Sud-africaine",
+            "ZA"
+          ]
+        },
+        {
+          "canonical": "ZMB",
+          "aliases": [
+            "Republic of Zambia",
+            "Zambia",
+            "Zambian",
+            "Zambie",
+            "Zambien",
+            "Zambienne",
+            "ZM"
+          ]
+        },
+        {
+          "canonical": "ZWE",
+          "aliases": [
+            "Republic of Zimbabwe",
+            "Zimbabwe",
+            "Zimbabwean",
+            "Zimbabwéen",
+            "Zimbabwéenne",
+            "ZW"
+          ]
+        }
+      ],
+      "pattern_values_only": true,
+      "fuzzy": {
+        "enabled": true,
+        "threshold": 90.0,
+        "min_margin": 8.0,
+        "min_length": 4
+      }
     },
     "sender_organization": {
       "on_unmapped": "preserve",
       "items": []
     }
+  },
+  "sources": {
+    "country_codes": "ISO 3166-1 alpha-3 (249 current entries)",
+    "localized_names": "Unicode CLDR 49: en, vi, fr",
+    "native_names_and_demonyms": "mledoze/countries snapshot 2026-11-14"
   }
 }

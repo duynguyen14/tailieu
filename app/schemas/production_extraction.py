@@ -159,6 +159,9 @@ class ProductionCatalogMappingEntry(BaseModel):
     raw_value: str | None = None
     canonical_value: str | None = None
     status: str
+    matched_alias: str | None = None
+    match_score: float | None = Field(default=None, ge=0.0, le=100.0)
+    second_best_score: float | None = Field(default=None, ge=0.0, le=100.0)
 
 
 class ProductionCatalogMappingReport(BaseModel):
