@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from app.schemas.visa_form_annotation import (
     VisaFormAnnotationDetail,
@@ -30,14 +30,37 @@ def visa_form_labels(request: Request) -> list[VisaFormFieldDefinition]:
 
 @router.get("/statistics", response_model=VisaFormReviewStats)
 def visa_form_statistics(request: Request) -> VisaFormReviewStats:
-    _, stats = _service(request).get_next_review()
+    _, stats, _ = _service(request).get_next_review()
     return stats
 
 
 @router.get("/review/next", response_model=VisaFormReviewQueueResponse)
-def get_next_visa_form_review(request: Request) -> VisaFormReviewQueueResponse:
-    current, stats = _service(request).get_next_review()
-    return VisaFormReviewQueueResponse(current=current, stats=stats)
+def get_next_visa_form_review(
+    request: Request,
+    search_id: str | None = Query(default=None),
+    sort_order: str = Query(default="NEWEST", pattern="^(NEWEST|OLDEST)$"),
+    from_index: int | None = Query(default=None, ge=0),
+    to_index: int | None = Query(default=None, ge=0),
+) -> VisaFormReviewQueueResponse:
+    if (from_index is None) != (to_index is None):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="from_index and to_index must be supplied together.",
+        )
+    if from_index is not None and to_index is not None and to_index < from_index:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="to_index must be greater than or equal to from_index.",
+        )
+    current, stats, current_index = _service(request).get_next_review(
+        search_id=search_id,
+        sort_order=sort_order,
+        from_index=from_index,
+        to_index=to_index,
+    )
+    return VisaFormReviewQueueResponse(
+        current=current, stats=stats, current_index=current_index
+    )
 
 
 @router.get("/{annotation_id}", response_model=VisaFormAnnotationDetail)

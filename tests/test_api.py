@@ -1889,6 +1889,19 @@ def test_visa_form_template_and_human_review_flow() -> None:
             "total": 1,
         }
 
+        ranged = client.get("/api/v1/visa-form-annotation/review/next?from_index=0&to_index=10")
+        assert ranged.status_code == 200
+        assert ranged.json()["current"]["annotation"]["id"] == annotation_id
+        assert ranged.json()["current_index"] == 0
+
+        out_of_range = client.get("/api/v1/visa-form-annotation/review/next?from_index=5&to_index=10")
+        assert out_of_range.status_code == 200
+        assert out_of_range.json()["current"] is None
+
+        by_id = client.get(f"/api/v1/visa-form-annotation/review/next?search_id={annotation_id}")
+        assert by_id.status_code == 200
+        assert by_id.json()["current"]["annotation"]["id"] == annotation_id
+
         fields = payload["current"]["fields"]
         fields[0]["bbox"] = [40, 50, 180, 80]
         reviewed = client.put(

@@ -99,4 +99,5 @@ class VisaFormReviewStats(BaseModel):
 
 class VisaFormReviewQueueResponse(BaseModel):
     current: VisaFormAnnotationDetail | None
+    current_index: int | None = Field(default=None, ge=0)
     stats: VisaFormReviewStats

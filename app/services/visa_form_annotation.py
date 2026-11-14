@@ -350,27 +350,97 @@ class VisaFormAnnotationService:
 
     def get_next_review(
         self,
-    ) -> tuple[VisaFormAnnotationDetail | None, VisaFormReviewStats]:
+        *,
+        search_id: str | None = None,
+        sort_order: str = "NEWEST",
+        from_index: int | None = None,
+        to_index: int | None = None,
+    ) -> tuple[VisaFormAnnotationDetail | None, VisaFormReviewStats, int | None]:
         with self._database.session() as session:
-            annotation = session.scalar(
-                select(VisaFormAnnotation)
-                .options(
-                    selectinload(VisaFormAnnotation.page),
-                    selectinload(VisaFormAnnotation.fields),
-                )
-                .where(
-                    VisaFormAnnotation.is_active == true(),
-                    VisaFormAnnotation.status == VisaFormAnnotationStatus.PENDING.value,
-                )
-                .order_by(
-                    VisaFormAnnotation.created_at.desc(), VisaFormAnnotation.id.desc()
-                )
-                .limit(1)
-            )
             stats = self._stats(session)
+            current_index: int | None = None
+
+            order = (
+                [VisaFormAnnotation.created_at.desc(), VisaFormAnnotation.id.desc()]
+                if sort_order == "NEWEST"
+                else [VisaFormAnnotation.created_at.asc(), VisaFormAnnotation.id.asc()]
+            )
+
+            all_active_query = (
+                select(VisaFormAnnotation.id)
+                .where(VisaFormAnnotation.is_active == true())
+                .order_by(*order)
+            )
+
+            normalized_id = search_id.strip() if search_id else ""
+            annotation_id: str | None = None
+
+            if normalized_id:
+                target = session.scalar(
+                    select(VisaFormAnnotation.id)
+                    .where(
+                        VisaFormAnnotation.is_active == true(),
+                        VisaFormAnnotation.status == VisaFormAnnotationStatus.PENDING.value,
+                        (VisaFormAnnotation.id == normalized_id)
+                        | (VisaFormAnnotation.page_id == normalized_id),
+                    )
+                    .order_by(*order)
+                    .limit(1)
+                )
+                if target is not None:
+                    annotation_id = target
+                    ordered_ids = list(session.scalars(all_active_query).all())
+                    if annotation_id in ordered_ids:
+                        current_index = ordered_ids.index(annotation_id)
+            elif from_index is not None and to_index is not None:
+                range_annotation_ids = list(
+                    session.scalars(
+                        all_active_query
+                        .offset(from_index)
+                        .limit(to_index - from_index + 1)
+                    ).all()
+                )
+                if range_annotation_ids:
+                    pending_ids = set(
+                        session.scalars(
+                            select(VisaFormAnnotation.id).where(
+                                VisaFormAnnotation.id.in_(range_annotation_ids),
+                                VisaFormAnnotation.status == VisaFormAnnotationStatus.PENDING.value,
+                                VisaFormAnnotation.is_active == true(),
+                            )
+                        ).all()
+                    )
+                    for local_idx, cand_id in enumerate(range_annotation_ids):
+                        if cand_id in pending_ids:
+                            annotation_id = cand_id
+                            current_index = from_index + local_idx
+                            break
+            else:
+                annotation_id = session.scalar(
+                    select(VisaFormAnnotation.id)
+                    .where(
+                        VisaFormAnnotation.is_active == true(),
+                        VisaFormAnnotation.status == VisaFormAnnotationStatus.PENDING.value,
+                    )
+                    .order_by(*order)
+                    .limit(1)
+                )
+
+            annotation = None
+            if annotation_id is not None:
+                annotation = session.scalar(
+                    select(VisaFormAnnotation)
+                    .options(
+                        selectinload(VisaFormAnnotation.page),
+                        selectinload(VisaFormAnnotation.fields),
+                    )
+                    .where(VisaFormAnnotation.id == annotation_id)
+                )
+
             return (
                 self._detail_from_model(session, annotation) if annotation else None,
                 stats,
+                current_index,
             )
 
     def review(
@@ -408,6 +478,7 @@ class VisaFormAnnotationService:
                 reviewed_by=payload.reviewed_by.strip(),
                 review_note=payload.review_note.strip() if payload.review_note else None,
                 reviewed_at=utc_now(),
+                created_at=current.created_at,
             )
             session.add(reviewed)
             session.flush()
