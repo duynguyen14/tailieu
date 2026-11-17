@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from app.services.visa_form_annotation import FIELD_CODES
+from app.visa_form_fields import FIELD_CODES
 from tools.export_visa_form_yolo_dataset import (
     pixel_bbox_to_yolo,
     split_document_ids,

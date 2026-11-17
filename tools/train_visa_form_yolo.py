@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.services.visa_form_annotation import FIELD_CODES
+from app.visa_form_fields import FIELD_CODES
 
 
 def parse_args() -> argparse.Namespace:

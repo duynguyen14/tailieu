@@ -28,7 +28,7 @@ from app.db.models import (
     VisaFormAnnotation,
 )
 from app.schemas.visa_form_annotation import VisaFormAnnotationStatus
-from app.services.visa_form_annotation import FIELD_CODES
+from app.visa_form_fields import FIELD_CODES
 
 
 @dataclass(frozen=True)
