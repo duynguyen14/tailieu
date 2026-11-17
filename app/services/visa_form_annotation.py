@@ -506,6 +506,10 @@ class VisaFormAnnotationService:
                 status=annotation.status,
                 template_version=annotation.template_version,
                 is_active=annotation.is_active,
+                model_name=annotation.model_name,
+                model_version=annotation.model_version,
+                processing_time_ms=annotation.processing_time_ms,
+                error_message=annotation.error_message,
                 reviewed_by=annotation.reviewed_by,
                 review_note=annotation.review_note,
                 reviewed_at=annotation.reviewed_at,
@@ -536,6 +540,7 @@ class VisaFormAnnotationService:
             value_text=field.value_text,
             bbox=(field.x1, field.y1, field.x2, field.y2),
             normalized_bbox=(field.nx1, field.ny1, field.nx2, field.ny2),
+            confidence=float(field.confidence) if field.confidence is not None else None,
         )
 
     @staticmethod

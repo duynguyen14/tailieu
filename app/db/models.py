@@ -885,12 +885,16 @@ class VisaFormAnnotation(Base):
     __tablename__ = "visa_form_annotations"
     __table_args__ = (
         CheckConstraint(
-            "source IN ('TEMPLATE', 'HUMAN')",
+            "source IN ('TEMPLATE', 'MODEL', 'HUMAN')",
             name="ck_visa_form_annotation_source",
         ),
         CheckConstraint(
             "status IN ('PENDING', 'REVIEWED', 'REJECTED')",
             name="ck_visa_form_annotation_status",
+        ),
+        CheckConstraint(
+            "processing_time_ms IS NULL OR processing_time_ms >= 0",
+            name="ck_visa_form_annotation_processing_time",
         ),
     )
 
@@ -907,6 +911,10 @@ class VisaFormAnnotation(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     image_width: Mapped[int] = mapped_column(Integer, nullable=False)
     image_height: Mapped[int] = mapped_column(Integer, nullable=False)
+    model_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    model_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    processing_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     reviewed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -940,6 +948,10 @@ class VisaFormFieldAnnotation(Base):
             "AND nx2 > nx1 AND ny2 > ny1",
             name="ck_visa_form_field_normalized_bbox",
         ),
+        CheckConstraint(
+            "confidence IS NULL OR (confidence >= 0 AND confidence <= 1)",
+            name="ck_visa_form_field_confidence",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -959,6 +971,7 @@ class VisaFormFieldAnnotation(Base):
     ny1: Mapped[int] = mapped_column(Integer, nullable=False)
     nx2: Mapped[int] = mapped_column(Integer, nullable=False)
     ny2: Mapped[int] = mapped_column(Integer, nullable=False)
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )

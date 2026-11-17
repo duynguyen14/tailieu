@@ -22,6 +22,10 @@ BEGIN
         is_active            BIT NOT NULL CONSTRAINT DF_visa_form_annotations_active DEFAULT (1),
         image_width          INT NOT NULL,
         image_height         INT NOT NULL,
+        model_name           NVARCHAR(255) NULL,
+        model_version        NVARCHAR(100) NULL,
+        processing_time_ms   INT NULL,
+        error_message        NVARCHAR(MAX) NULL,
         reviewed_by          NVARCHAR(100) NULL,
         review_note          NVARCHAR(MAX) NULL,
         reviewed_at          DATETIMEOFFSET(7) NULL,
@@ -35,11 +39,14 @@ BEGIN
             REFERENCES dbo.annotation_pages(id) ON DELETE CASCADE,
         CONSTRAINT FK_visa_form_annotations_parent FOREIGN KEY (parent_annotation_id)
             REFERENCES dbo.visa_form_annotations(id),
-        CONSTRAINT CK_visa_form_annotations_source CHECK (source IN (N'TEMPLATE', N'HUMAN')),
+        CONSTRAINT CK_visa_form_annotations_source CHECK
+            (source IN (N'TEMPLATE', N'MODEL', N'HUMAN')),
         CONSTRAINT CK_visa_form_annotations_status CHECK
             (status IN (N'PENDING', N'REVIEWED', N'REJECTED')),
         CONSTRAINT CK_visa_form_annotations_dimensions CHECK
             (image_width > 0 AND image_height > 0),
+        CONSTRAINT CK_visa_form_annotations_processing_time CHECK
+            (processing_time_ms IS NULL OR processing_time_ms >= 0),
         CONSTRAINT CK_visa_form_annotations_parent CHECK
             (parent_annotation_id IS NULL OR parent_annotation_id <> id)
     );
@@ -63,6 +70,7 @@ BEGIN
         ny1 INT NOT NULL,
         nx2 INT NOT NULL,
         ny2 INT NOT NULL,
+        confidence NUMERIC(9, 6) NULL,
         created_at DATETIMEOFFSET(7) NOT NULL
             CONSTRAINT DF_visa_form_fields_created DEFAULT SYSUTCDATETIME(),
         updated_at DATETIMEOFFSET(7) NOT NULL
@@ -78,9 +86,55 @@ BEGIN
             (x1 >= 0 AND y1 >= 0 AND x2 > x1 AND y2 > y1),
         CONSTRAINT CK_visa_form_fields_normalized_bbox CHECK
             (nx1 >= 0 AND ny1 >= 0 AND nx2 <= 1000 AND ny2 <= 1000
-             AND nx2 > nx1 AND ny2 > ny1)
+             AND nx2 > nx1 AND ny2 > ny1),
+        CONSTRAINT CK_visa_form_fields_confidence CHECK
+            (confidence IS NULL OR (confidence >= 0 AND confidence <= 1))
     );
 END;
+GO
+
+IF COL_LENGTH(N'dbo.visa_form_annotations', N'model_name') IS NULL
+    ALTER TABLE dbo.visa_form_annotations ADD model_name NVARCHAR(255) NULL;
+IF COL_LENGTH(N'dbo.visa_form_annotations', N'model_version') IS NULL
+    ALTER TABLE dbo.visa_form_annotations ADD model_version NVARCHAR(100) NULL;
+IF COL_LENGTH(N'dbo.visa_form_annotations', N'processing_time_ms') IS NULL
+    ALTER TABLE dbo.visa_form_annotations ADD processing_time_ms INT NULL;
+IF COL_LENGTH(N'dbo.visa_form_annotations', N'error_message') IS NULL
+    ALTER TABLE dbo.visa_form_annotations ADD error_message NVARCHAR(MAX) NULL;
+IF COL_LENGTH(N'dbo.visa_form_field_annotations', N'confidence') IS NULL
+    ALTER TABLE dbo.visa_form_field_annotations ADD confidence NUMERIC(9, 6) NULL;
+GO
+
+IF EXISTS (
+    SELECT 1 FROM sys.check_constraints
+    WHERE name = N'CK_visa_form_annotations_source'
+      AND parent_object_id = OBJECT_ID(N'dbo.visa_form_annotations')
+)
+    ALTER TABLE dbo.visa_form_annotations
+        DROP CONSTRAINT CK_visa_form_annotations_source;
+ALTER TABLE dbo.visa_form_annotations WITH CHECK
+    ADD CONSTRAINT CK_visa_form_annotations_source
+    CHECK (source IN (N'TEMPLATE', N'MODEL', N'HUMAN'));
+GO
+
+IF NOT EXISTS (
+    SELECT 1 FROM sys.check_constraints
+    WHERE name = N'CK_visa_form_annotations_processing_time'
+      AND parent_object_id = OBJECT_ID(N'dbo.visa_form_annotations')
+)
+    ALTER TABLE dbo.visa_form_annotations WITH CHECK
+        ADD CONSTRAINT CK_visa_form_annotations_processing_time
+        CHECK (processing_time_ms IS NULL OR processing_time_ms >= 0);
+GO
+
+IF NOT EXISTS (
+    SELECT 1 FROM sys.check_constraints
+    WHERE name = N'CK_visa_form_fields_confidence'
+      AND parent_object_id = OBJECT_ID(N'dbo.visa_form_field_annotations')
+)
+    ALTER TABLE dbo.visa_form_field_annotations WITH CHECK
+        ADD CONSTRAINT CK_visa_form_fields_confidence
+        CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1));
 GO
 
 IF NOT EXISTS (

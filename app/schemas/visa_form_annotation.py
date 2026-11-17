@@ -12,6 +12,7 @@ BBox = Annotated[tuple[int, int, int, int], Field(description="[x1, y1, x2, y2]"
 
 class VisaFormAnnotationSource(StrEnum):
     TEMPLATE = "TEMPLATE"
+    MODEL = "MODEL"
     HUMAN = "HUMAN"
 
 
@@ -38,6 +39,7 @@ class VisaFormFieldPayload(BaseModel):
     value_text: str | None = Field(default=None, max_length=4000)
     bbox: BBox
     normalized_bbox: BBox
+    confidence: float | None = Field(default=None, ge=0, le=1)
 
     @model_validator(mode="after")
     def validate_geometry(self) -> VisaFormFieldPayload:
@@ -76,6 +78,10 @@ class VisaFormAnnotationInfo(BaseModel):
     status: VisaFormAnnotationStatus
     template_version: str
     is_active: bool
+    model_name: str | None
+    model_version: str | None
+    processing_time_ms: int | None = Field(default=None, ge=0)
+    error_message: str | None
     reviewed_by: str | None
     review_note: str | None
     reviewed_at: datetime | None
